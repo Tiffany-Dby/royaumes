@@ -18,6 +18,15 @@ pnpm dev
 
 L'application est disponible à l'adresse http://localhost:3000.
 
+## Comptes et configuration
+
+L'espace de jeu est réservé aux joueurs connectés. Créez un compte depuis la page
+http://localhost:3000/login.
+
+Les variables d'environnement sont documentées dans le fichier `.env.example`. En local,
+aucune n'est obligatoire. Pour définir vos propres valeurs, copiez ce fichier en
+`.env.local`, qui n'est jamais versionné.
+
 ## Commandes
 
 | Commande | Rôle |
@@ -66,6 +75,7 @@ Les tests utilisent une base PGlite en mémoire, recréée pour chaque fichier d
 
 - [Décisions d'architecture](docs/adr/README.md)
 - [Registre de la dette technique](docs/qualite/dette-technique.md)
+- [Revue de sécurité de l'authentification](docs/qualite/revue-securite-authentification.md)
 
 ## Conventions
 
@@ -74,6 +84,4 @@ Les tests utilisent une base PGlite en mémoire, recréée pour chaque fichier d
 
 ## Limites actuelles
 
-Le projet est en cours de construction. Toutes les requêtes sont attribuées à un joueur
-unique, en attendant l'authentification. Cette limite est recensée dans le registre de
-la dette technique.
+Le projet n'est pas encore déployé : il ne fonctionne que sur un poste de développement.
