@@ -92,4 +92,18 @@ describe("Contrôle d'accès à l'API du Village", () => {
     const { get } = await createTestApi()
     expect((await get('/api/system/health', null)).status).toBe(200)
   })
+
+  it('autorise un joueur à écouter le canal de son village', async () => {
+    const { get, post } = await createTestApi()
+    await post('/api/realm/village', { name: 'Valombre' })
+    const res = await get('/api/stream/village-alice')
+
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('"type":"VillageFounded"')
+  })
+
+  it("refuse l'écoute du village d'un autre joueur (403)", async () => {
+    const { get } = await createTestApi()
+    expect((await get('/api/stream/village-bob', 'alice')).status).toBe(403)
+  })
 })
