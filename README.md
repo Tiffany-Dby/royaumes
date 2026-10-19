@@ -52,6 +52,15 @@ Un module n'est accessible depuis l'extérieur que par ses entrées publiques : 
 | --- | --- | --- |
 | `system` | Route de santé | `/api/system` |
 | `realm` | Village : fondation, production de ressources, amélioration des bâtiments | `/api/realm` |
+| `pnpm db:generate --name <nom>` | Production d'une migration après la modification d'un fichier `schema.ts` |
+
+## Base de données
+
+En développement, la base PostgreSQL est fournie par PGlite et conservée dans le répertoire
+`.data/`, exclu du dépôt. Les migrations du répertoire `drizzle/` y sont appliquées au
+démarrage. Pour repartir d'une base vide, arrêtez le serveur et supprimez le répertoire `.data/`.
+
+Les tests utilisent une base PGlite en mémoire, recréée pour chaque fichier de test.
 
 ## Documentation
 
@@ -65,6 +74,6 @@ Un module n'est accessible depuis l'extérieur que par ses entrées publiques : 
 
 ## Limites actuelles
 
-Le projet est en cours de construction. Les données du Village sont conservées en mémoire
-et sont perdues à chaque redémarrage du serveur, et toutes les requêtes sont attribuées à
-un joueur unique. Ces limites sont recensées dans le registre de la dette technique.
+Le projet est en cours de construction. Toutes les requêtes sont attribuées à un joueur
+unique, en attendant l'authentification. Cette limite est recensée dans le registre de
+la dette technique.
