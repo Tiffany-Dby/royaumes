@@ -12,6 +12,7 @@
     "start": "next start",
     "lint": "biome ci .",
     "lint:fix": "biome check --write .",
+    "lint:archi": "depcruise src app --config .dependency-cruiser.cjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -27,6 +28,7 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dependency-cruiser": "18.6.0",
     "typescript": "6.0.3",
     "vitest": "5.0.4"
   },
