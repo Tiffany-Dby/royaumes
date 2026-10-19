@@ -1,8 +1,8 @@
-import { type Api, createApi } from "./create-api";
+import { type Api, createApi } from './create-api'
 
 /** Ce que l'application expose à Next.js : pour l'instant, la seule API. */
 interface Server {
-  api: Api;
+  api: Api
 }
 
 /**
@@ -11,7 +11,7 @@ interface Server {
  * une simple variable de module serait alors réinitialisée, et l'application
  * reconstruite à chaque fois.
  */
-const globalForServer = globalThis as unknown as { royaumes?: Server };
+const globalForServer = globalThis as unknown as { royaumes?: Server }
 
 /**
  * Renvoie l'application, en la construisant à la première demande.
@@ -20,7 +20,7 @@ const globalForServer = globalThis as unknown as { royaumes?: Server };
  */
 export function getServer(): Server {
   if (!globalForServer.royaumes) {
-    globalForServer.royaumes = { api: createApi() };
+    globalForServer.royaumes = { api: createApi() }
   }
-  return globalForServer.royaumes;
+  return globalForServer.royaumes
 }

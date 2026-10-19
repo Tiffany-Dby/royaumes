@@ -1,4 +1,4 @@
-import { HealthStatus } from "@/modules/system/ui";
+import { HealthStatus } from '@/modules/system/ui'
 
 /**
  * Page d'accueil provisoire.
@@ -12,5 +12,5 @@ export default function Home() {
       <p className="muted">Le socle du projet est en place.</p>
       <HealthStatus />
     </>
-  );
+  )
 }
