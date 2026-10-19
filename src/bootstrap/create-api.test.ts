@@ -17,4 +17,9 @@ describe("Assemblage de l'API", () => {
       error: { code: 'NOT_FOUND', message: 'Route inconnue' },
     })
   })
+
+  it('réserve le temps réel aux joueurs connectés (401)', async () => {
+    const { get } = await createTestApi()
+    expect((await get('/api/stream/village-alice', null)).status).toBe(401)
+  })
 })

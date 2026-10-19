@@ -33,8 +33,11 @@ export function getServer(): Server {
     const { db, ready } = createDatabase()
     const store = createEventStore(db)
     const auth = createBetterAuth(db)
+    // Durée maximale d'un flux temps réel : 240 s par défaut, sous la limite de 300 s de Vercel.
+    // La variable STREAM_MAX_SECONDS permet de la raccourcir pour observer la reconnexion.
+    const maxStreamMs = Number(process.env.STREAM_MAX_SECONDS ?? 240) * 1000
     globalForServer.royaumes = {
-      api: createApi({ auth, store, ready }),
+      api: createApi({ auth, store, ready, realtime: { maxStreamMs } }),
       auth,
       ready,
     }
