@@ -29,6 +29,13 @@
       "when": 1792491724345,
       "tag": "0003_classement",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792492457467,
+      "tag": "0004_version_projections",
+      "breakpoints": true
     }
   ]
 }
