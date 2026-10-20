@@ -8,6 +8,7 @@ import {
   BOSS,
   COMMON_MONSTERS,
   DAMAGE_SPREAD,
+  type Difficulty,
   DUNGEON_LENGTH,
   HEAL_AMOUNT,
   HERO,
@@ -25,14 +26,13 @@ import {
   evolve,
   type GameEvent,
   type GameState,
-  type Hero,
-  type Monster,
   type MonsterSpec,
   type Phase,
   type Room,
   standingHeroes,
   standingMonsters,
 } from './game'
+import { MONSTER_STRATEGIES } from './monster-strategies'
 import { mix, pick, type Random, randomInt, seeded } from './random'
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,13 @@ import { mix, pick, type Random, randomInt, seeded } from './random'
 // ---------------------------------------------------------------------------
 
 export type GameCommand =
-  | { type: 'CreateGame'; playerId: string; name: string; seed: number }
+  | {
+      type: 'CreateGame'
+      playerId: string
+      name: string
+      difficulty: Difficulty
+      seed: number
+    }
   | { type: 'JoinGame'; playerId: string; name: string }
   | { type: 'StartGame'; playerId: string }
   | { type: 'OpenDoor'; playerId: string }
@@ -118,15 +124,6 @@ const spec = (kind: MonsterKind): MonsterSpec => ({
 const rollDamage = (random: Random, attack: number, spread: number) =>
   Math.max(1, randomInt(random, attack - spread, attack + spread))
 
-/**
- * Cible d'un monstre : le héros debout qui a le moins de points de vie
- * (le premier dans l'ordre des héros en cas d'égalité).
- * Règle fixe du TD6, remplacée au TD7 par une intelligence artificielle.
- */
-export function chooseMonsterTarget(_monster: Monster, heroes: Hero[]): Hero {
-  return heroes.reduce((weakest, hero) => (hero.hp < weakest.hp ? hero : weakest))
-}
-
 // ---------------------------------------------------------------------------
 // Résolution d'une manche
 // ---------------------------------------------------------------------------
@@ -180,11 +177,13 @@ export function resolveRound(state: GameState, at: number): GameEvent[] {
     record({ kind: 'damage', source: heroId, target, amount })
   }
 
-  // 3. Les attaques des monstres encore debout. La défense divise les dégâts par deux.
+  // 3. Les attaques des monstres encore debout, dont la cible est choisie par la stratégie
+  //    du niveau de difficulté. La défense divise les dégâts par deux.
+  const strategy = MONSTER_STRATEGIES[state.difficulty]
   for (const monster of monsters) {
     const targets = heroes.filter((hero) => hero.hp > 0)
     if (monster.hp <= 0 || targets.length === 0) continue
-    const target = chooseMonsterTarget(monster, targets)
+    const target = strategy({ monster, heroes: targets, actions, random })
     let amount = rollDamage(random, monster.attack, DAMAGE_SPREAD.monster)
     if (actions[target.id]?.type === 'defend') amount = Math.ceil(amount / 2)
     record({ kind: 'damage', source: monster.id, target: target.id, amount })
@@ -252,7 +251,7 @@ const isMember = (state: GameState, playerId: string) =>
 function decideCommand(state: GameState, command: GameCommand, now: number): Decision {
   if (command.type === 'CreateGame') {
     if (state.exists) return fail({ code: 'ALREADY_EXISTS' })
-    const { playerId, name, seed } = command
+    const { playerId, name, difficulty, seed } = command
     return {
       ok: true,
       events: [
@@ -262,6 +261,7 @@ function decideCommand(state: GameState, command: GameCommand, now: number): Dec
             hostId: playerId,
             hostName: name,
             hero: { ...HERO },
+            difficulty,
             seed,
             at: now,
           },
