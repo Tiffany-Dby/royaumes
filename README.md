@@ -40,6 +40,9 @@ aucune n'est obligatoire. Pour définir vos propres valeurs, copiez ce fichier e
 | `pnpm typecheck` | Vérification des types (TypeScript) |
 | `pnpm test` | Exécution des tests (Vitest) |
 | `pnpm verify` | Ensemble des contrôles, à exécuter avant toute publication |
+| `pnpm db:generate --name <nom>` | Production d'une migration après la modification d'un fichier `schema.ts` |
+| `pnpm db:migrate` | Application des migrations à la base désignée par `DATABASE_URL_UNPOOLED` ou `DATABASE_URL` |
+| `pnpm vercel-build` | Construction exécutée par Vercel : contrôles, migrations, puis construction |
 
 ## Architecture
 
@@ -50,8 +53,12 @@ src/
   modules/            Modules métier, un répertoire par contexte délimité
   bootstrap/          Racine de composition
   ui/                 Thème et composants d'interface partagés
+scripts/              Scripts d'exploitation (migrations)
+drizzle/              Migrations de la base de données
 docs/
   adr/                Décisions d'architecture
+  qualite/            Dette technique et revues
+  architecture.md     Description de l'architecture (modèle C4)
 ```
 
 Un module n'est accessible depuis l'extérieur que par ses entrées publiques : `index.ts`
@@ -61,7 +68,17 @@ Un module n'est accessible depuis l'extérieur que par ses entrées publiques : 
 | --- | --- | --- |
 | `system` | Route de santé | `/api/system` |
 | `realm` | Village : fondation, production de ressources, amélioration des bâtiments | `/api/realm` |
-| `pnpm db:generate --name <nom>` | Production d'une migration après la modification d'un fichier `schema.ts` |
+
+## Temps réel
+
+Les changements sont diffusés aux navigateurs par des Server-Sent Events, à l'adresse
+`/api/stream/<canal>`. Chaque canal correspond à un flux du journal d'événements ; il n'est
+accessible qu'aux joueurs connectés autorisés par la règle du module concerné. Le canal
+`village-<joueur>` n'est ainsi accessible qu'au propriétaire du village.
+
+Un flux se ferme de lui-même au bout de 240 secondes, et le navigateur s'y reconnecte
+sans perte d'événement. En développement, la variable `STREAM_MAX_SECONDS` permet de
+raccourcir cette durée pour observer la reconnexion.
 
 ## Base de données
 
@@ -71,8 +88,22 @@ démarrage. Pour repartir d'une base vide, arrêtez le serveur et supprimez le r
 
 Les tests utilisent une base PGlite en mémoire, recréée pour chaque fichier de test.
 
+En production, la base est hébergée par Neon. Les migrations y sont appliquées lors de
+chaque déploiement, après les contrôles et avant la construction de l'application.
+
+## Déploiement
+
+L'application est déployée sur Vercel, dans la région de Francfort ; son adresse est
+indiquée dans la rubrique « About » du dépôt GitHub. Chaque envoi sur la branche `main`
+déclenche un déploiement, qui n'aboutit que si `pnpm verify` réussit.
+
+Les variables `DATABASE_URL` et `DATABASE_URL_UNPOOLED` sont fournies par l'intégration
+Neon de Vercel. La variable `BETTER_AUTH_SECRET` est définie dans les réglages du projet
+Vercel ; elle n'est jamais versionnée, et l'application refuse de démarrer sans elle.
+
 ## Documentation
 
+- [Architecture](docs/architecture.md)
 - [Décisions d'architecture](docs/adr/README.md)
 - [Registre de la dette technique](docs/qualite/dette-technique.md)
 - [Revue de sécurité de l'authentification](docs/qualite/revue-securite-authentification.md)
@@ -84,4 +115,7 @@ Les tests utilisent une base PGlite en mémoire, recréée pour chaque fichier d
 
 ## Limites actuelles
 
-Le projet n'est pas encore déployé : il ne fonctionne que sur un poste de développement.
+Chaque flux temps réel relit le journal d'événements deux fois par seconde : la charge de
+la base croît avec le nombre de joueurs connectés. Ce compromis, acceptable pour le nombre
+de joueurs du projet, est décrit dans l'ADR 0003. Les autres limites connues sont recensées
+dans le registre de la dette technique.
