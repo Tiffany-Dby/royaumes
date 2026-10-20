@@ -14,6 +14,7 @@ import { createDrizzleOffersReader } from './infrastructure/drizzle-offers-reade
 import { createEventStoreOfferRepository } from './infrastructure/event-store-offer-repository'
 import { offersProjection } from './infrastructure/offers-projection'
 import { createMarketHandlers } from './messages'
+import { createMarketPersonalData } from './personal-data'
 
 export interface MarketModuleDeps {
   /** Journal d'événements de la plateforme. */
@@ -50,6 +51,7 @@ export function createMarketModule({ store, db, projections, dispatch, clock }: 
     api: createMarketApi(service),
     channelPolicy,
     handlers: createMarketHandlers(service),
+    personalData: createMarketPersonalData(store, db),
   }
 }
 

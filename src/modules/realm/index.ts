@@ -10,6 +10,7 @@ import { createVillageService } from './application/village-service'
 import { villageChannel } from './contracts'
 import { createEventStoreVillageRepository } from './infrastructure/event-store-village-repository'
 import { createRealmHandlers } from './messages'
+import { createRealmPersonalData } from './personal-data'
 
 export interface RealmModuleDeps {
   /** Journal d'événements de la plateforme, fourni par la racine de composition. */
@@ -36,6 +37,7 @@ export function createRealmModule({ store, clock }: RealmModuleDeps) {
     api: createRealmApi(service),
     channelPolicy,
     handlers: createRealmHandlers(service),
+    personalData: createRealmPersonalData(service),
   }
 }
 
