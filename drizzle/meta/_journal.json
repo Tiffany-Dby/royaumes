@@ -50,6 +50,13 @@
       "when": 1792496187596,
       "tag": "0006_expeditions_ouvertes",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792498939070,
+      "tag": "0007_boite_envoi",
+      "breakpoints": true
     }
   ]
 }

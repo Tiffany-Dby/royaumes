@@ -5,5 +5,11 @@
   "buildCommand": "pnpm vercel-build",
   "regions": [
     "fra1"
+  ],
+  "crons": [
+    {
+      "path": "/api/outbox/dispatch",
+      "schedule": "0 4 * * *"
+    }
   ]
 }
