@@ -13,6 +13,7 @@ const hero = (id: string, hp: number): Hero => ({
   hp,
   maxHp: 30,
   attack: 6,
+  companion: false,
 })
 const troll: Monster = {
   id: 'm0',
