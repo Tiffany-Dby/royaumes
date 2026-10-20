@@ -71,6 +71,13 @@
       "when": 1792506225474,
       "tag": "0009_taverne",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792506696430,
+      "tag": "0010_presence",
+      "breakpoints": true
     }
   ]
 }
