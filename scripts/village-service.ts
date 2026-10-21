@@ -8,21 +8,30 @@
  * L'application doit être démarrée avec REALM_SERVICE_URL=http://localhost:4000
  * et le même SERVICE_SECRET.
  */
-import { serve } from '@hono/node-server'
-import { createDatabase } from '@/platform/db/client'
-import { createVillageServiceApp } from '@/services/village/village-service'
+import { serve } from "@hono/node-server";
+import { createDatabase } from "@/platform/db/client";
+import { createVillageServiceApp } from "@/services/village/village-service";
 
-const secret = process.env.SERVICE_SECRET
-if (!secret) throw new Error('SERVICE_SECRET est obligatoire : il authentifie les échanges.')
-const port = Number(process.env.PORT ?? 4000)
+const secret = process.env.SERVICE_SECRET;
+if (!secret)
+  throw new Error(
+    "SERVICE_SECRET est obligatoire : il authentifie les échanges.",
+  );
+const port = Number(process.env.PORT ?? 4000);
 
-const { db, ready } = createDatabase(process.env.VILLAGE_DATABASE_URL, 'village')
-await ready
+// DETTE TECHNIQUE (docs/qualite/dette-technique.md, service Village) : la base locale reçoit
+// toutes les migrations de l'application, y compris les tables des autres modules ; une base
+// désignée par VILLAGE_DATABASE_URL n'en reçoit aucune.
+const { db, ready } = createDatabase(
+  process.env.VILLAGE_DATABASE_URL,
+  "village",
+);
+await ready;
 
 const app = createVillageServiceApp({
   db,
   secret,
-  appUrl: process.env.APP_URL ?? 'http://localhost:3000',
-})
-serve({ fetch: app.fetch, port })
-console.log(`Service Village : http://localhost:${port}`)
+  appUrl: process.env.APP_URL ?? "http://localhost:3000",
+});
+serve({ fetch: app.fetch, port });
+console.log(`Service Village : http://localhost:${port}`);
