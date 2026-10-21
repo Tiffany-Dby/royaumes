@@ -36,6 +36,11 @@ export function getServer(): Server {
     // Durée maximale d'un flux temps réel : 240 s par défaut, sous la limite de 300 s de Vercel.
     // La variable STREAM_MAX_SECONDS permet de la raccourcir pour observer la reconnexion.
     const maxStreamMs = Number(process.env.STREAM_MAX_SECONDS ?? 240) * 1000
+    // Service Village extrait (TD11) : utilisé seulement si son adresse et le secret partagé
+    // sont définis. Sur Vercel, ils ne le sont pas : le Village s'exécute dans le processus.
+    const url = process.env.REALM_SERVICE_URL
+    const secret = process.env.SERVICE_SECRET
+    const realmService = url && secret ? { url, secret } : undefined
     globalForServer.royaumes = {
       api: createApi({
         auth,
@@ -44,6 +49,7 @@ export function getServer(): Server {
         ready,
         realtime: { maxStreamMs },
         cronSecret: process.env.CRON_SECRET,
+        realmService,
       }),
       auth,
       ready,
