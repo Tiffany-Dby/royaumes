@@ -1,5 +1,6 @@
 import { asc } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { gameChannel } from '@/modules/dungeon/contracts'
 import { villageChannel } from '@/modules/realm/contracts'
 import { createTestDatabase, type Db } from '@/platform/db/client'
 import {
@@ -15,7 +16,7 @@ import {
 } from '@/platform/projection/projection'
 import { projections } from '@/platform/projection/schema'
 import { progressProjection } from './progress-projection'
-import { dailyProgress } from './schema'
+import { dailyProgress, gamePlayers } from './schema'
 
 const T0 = Date.UTC(2026, 9, 23)
 const NEXT_DAY = Date.UTC(2026, 9, 24)
@@ -53,7 +54,7 @@ describe('Builder progress projection', () => {
     await runner.catchUp(progressProjection)
     expect(await rows()).toEqual([])
     expect(await db.select().from(projections)).toMatchObject([
-      { name: 'quests-progress', version: 1, position: 0 },
+      { name: 'quests-progress', version: 2, position: 0 },
     ])
   })
 
@@ -106,7 +107,7 @@ describe('Builder progress projection', () => {
       { type: 'VillageFounded', data: { name: 'Private village', at: T0 } },
       { type: 'ResourcesDeposited', data: { at: T0 } },
     ])
-    await store.append('dungeon-g1', 0, [{ type: 'GameEnded', data: { at: T0 } }])
+    await store.append('dungeon-g1', 0, [{ type: 'GameStarted', data: { rooms: [], at: T0 } }])
     await store.append('market-o1', 0, [{ type: 'TradeCompleted', data: { at: T0 } }])
     await runner.catchUp(progressProjection)
     expect(await rows()).toEqual([])
@@ -229,5 +230,305 @@ describe('Builder progress projection', () => {
     await later.catchUp(progressProjection)
     expect(await rows()).toEqual([progress('alice'), progress('bob')])
     expect(await later.positionOf(progressProjection.name)).toBe(await store.lastPosition())
+  })
+})
+
+const created = (hostId = 'alice', at = T0): NewEvent => ({
+  type: 'GameCreated',
+  data: {
+    hostId,
+    hostName: `Private name of ${hostId}`,
+    hero: { hp: 30, attack: 6 },
+    difficulty: 'easy',
+    seed: 42,
+    at,
+  },
+})
+
+const joined = (playerId = 'bob', at = T0): NewEvent => ({
+  type: 'PlayerJoined',
+  data: { playerId, name: `Private name of ${playerId}`, hero: { hp: 30, attack: 6 }, at },
+})
+
+const companion: NewEvent = {
+  type: 'CompanionAdded',
+  data: {
+    companionId: 'companion-1',
+    name: 'Private companion',
+    hero: { hp: 30, attack: 6 },
+    at: T0,
+  },
+}
+
+const ended = (result: 'won' | 'lost' = 'won', heroIds = ['alice'], at = T0): NewEvent => ({
+  type: 'GameEnded',
+  data: { result, loot: 25, heroIds, at },
+})
+
+const participants = () =>
+  db.select().from(gamePlayers).orderBy(asc(gamePlayers.gameId), asc(gamePlayers.playerId))
+
+const adventurer = (playerId: string, day = '2026-10-23') => ({
+  playerId,
+  day,
+  questId: 'adventurer',
+  count: 1,
+})
+
+describe('Adventurer progress projection', () => {
+  it.each(['won', 'lost'] as const)('credits the human host of a %s expedition', async (result) => {
+    await store.append(gameChannel('g1'), 0, [created(), ended(result)])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([adventurer('alice')])
+    expect(await participants()).toEqual([])
+  })
+
+  it('retains unique human participants without names, companions or premature progress', async () => {
+    await store.append(gameChannel('g1'), 0, [
+      created(),
+      joined(),
+      joined(),
+      joined('carol'),
+      companion,
+    ])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([])
+    expect(await participants()).toEqual([
+      { gameId: 'g1', playerId: 'alice' },
+      { gameId: 'g1', playerId: 'bob' },
+      { gameId: 'g1', playerId: 'carol' },
+    ])
+
+    await store.append(gameChannel('g1'), 5, [
+      ended('lost', ['alice', 'bob', 'carol', 'companion-1']),
+    ])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([adventurer('alice'), adventurer('bob'), adventurer('carol')])
+    expect(await participants()).toEqual([])
+  })
+
+  it('identifies humans through membership events rather than identifier spelling', async () => {
+    await store.append(gameChannel('g1'), 0, [
+      created('companion-player'),
+      companion,
+      ended('won', ['companion-player', 'companion-1']),
+    ])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([adventurer('companion-player')])
+  })
+
+  it('keeps membership across midnight and credits the gameplay completion day', async () => {
+    await store.append(gameChannel('g1'), 0, [
+      created('alice', NEXT_DAY - 1000),
+      joined('bob', NEXT_DAY - 1),
+    ])
+    await runner.catchUp(progressProjection)
+    expect(await participants()).toHaveLength(2)
+    expect(await rows()).toEqual([])
+
+    await store.append(gameChannel('g1'), 2, [ended('won', ['alice', 'bob'], NEXT_DAY)])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([
+      adventurer('alice', '2026-10-24'),
+      adventurer('bob', '2026-10-24'),
+    ])
+    expect(await participants()).toEqual([])
+  })
+
+  it('isolates games and days while capping progress and preserving Builder counters', async () => {
+    await store.append(villageChannel('alice'), 0, [upgraded(), upgraded(), upgraded()])
+    await store.append(gameChannel('g1'), 0, [created(), joined(), ended('lost', ['alice', 'bob'])])
+    await store.append(gameChannel('g2'), 0, [
+      created(),
+      joined('carol'),
+      ended('won', ['alice', 'carol']),
+    ])
+    await store.append(gameChannel('g3'), 0, [
+      created('alice', NEXT_DAY),
+      ended('won', ['alice'], NEXT_DAY),
+    ])
+    await store.append(gameChannel('g4'), 0, [created('dave')])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([
+      adventurer('alice'),
+      progress('alice', '2026-10-23', 2),
+      adventurer('alice', '2026-10-24'),
+      adventurer('bob'),
+      adventurer('carol'),
+    ])
+    expect(await participants()).toEqual([{ gameId: 'g4', playerId: 'dave' }])
+  })
+
+  it('ignores Dungeon event types from unexpected or empty Dungeon streams', async () => {
+    for (const stream of [
+      'village-alice',
+      'market-o1',
+      'other-dungeon-g1',
+      'dungeon',
+      'dungeon-',
+    ]) {
+      await store.append(stream, 0, [
+        { type: 'GameCreated', data: {} },
+        { type: 'PlayerJoined', data: {} },
+        { type: 'GameEnded', data: {} },
+      ])
+    }
+    await runner.catchUp(progressProjection)
+    expect(await participants()).toEqual([])
+    expect(await rows()).toEqual([])
+    expect(await runner.positionOf(progressProjection.name)).toBe(await store.lastPosition())
+  })
+
+  it('does not duplicate membership or progress on repeated and concurrent catch-up', async () => {
+    await store.append(gameChannel('g1'), 0, [created(), joined()])
+    await Promise.all([runner.catchUp(progressProjection), runner.catchUp(progressProjection)])
+    expect(await participants()).toHaveLength(2)
+    await store.append(gameChannel('g1'), 2, [ended('won', ['alice', 'bob'])])
+    await Promise.all([runner.catchUp(progressProjection), runner.catchUp(progressProjection)])
+    expect(await rows()).toEqual([adventurer('alice'), adventurer('bob')])
+    expect(await participants()).toEqual([])
+    expect(await runner.catchUp(progressProjection)).toBe(0)
+  })
+
+  it.each(
+    [undefined, null, '', 42].flatMap((id) =>
+      ['GameCreated', 'PlayerJoined'].map((type) => ({ type, id })),
+    ),
+  )('rejects an invalid human identifier in $type ($id) atomically', async ({ type, id }) => {
+    await store.append(gameChannel(type), 0, [
+      ...(type === 'PlayerJoined' ? [created()] : []),
+      {
+        type,
+        data: {
+          ...(type === 'GameCreated' ? created().data : joined().data),
+          hostId: id,
+          playerId: id,
+        },
+      },
+    ])
+    await expect(runner.catchUp(progressProjection)).rejects.toThrow('player identifier')
+    expect(await participants()).toEqual([])
+    expect(await rows()).toEqual([])
+    expect(await db.select().from(projections)).toEqual([])
+  })
+
+  it.each([joined(), ended()])('rejects $type without recorded human membership', async (event) => {
+    await store.append(gameChannel('g1'), 0, [event])
+    await expect(runner.catchUp(progressProjection)).rejects.toThrow('participation context')
+    expect(await participants()).toEqual([])
+    expect(await rows()).toEqual([])
+    expect(await db.select().from(projections)).toEqual([])
+  })
+
+  it.each([undefined, null, '2026-10-23', Number.MAX_VALUE])(
+    'preserves membership and checkpoint when completion time %s is invalid',
+    async (at) => {
+      await store.append(gameChannel('g1'), 0, [created(), joined()])
+      await runner.catchUp(progressProjection)
+      const before = await participants()
+      const checkpoint = await db.select().from(projections)
+      await store.append(gameChannel('g1'), 2, [{ ...ended(), data: { ...ended().data, at } }])
+      await expect(runner.catchUp(progressProjection)).rejects.toThrow(RangeError)
+      expect(await participants()).toEqual(before)
+      expect(await rows()).toEqual([])
+      expect(await db.select().from(projections)).toEqual(checkpoint)
+    },
+  )
+
+  it('rejects a completion without a valid expedition result', async () => {
+    await store.append(gameChannel('g1'), 0, [
+      created(),
+      { ...ended(), data: { ...ended().data, result: 'unknown' } },
+    ])
+    await expect(runner.catchUp(progressProjection)).rejects.toThrow('result')
+    expect(await participants()).toEqual([])
+    expect(await rows()).toEqual([])
+    expect(await db.select().from(projections)).toEqual([])
+  })
+
+  it('rebuilds completed progress and active membership from the same journal', async () => {
+    await store.append(gameChannel('g1'), 0, [
+      created(),
+      joined(),
+      companion,
+      ended('lost', ['alice', 'bob', 'companion-1']),
+    ])
+    await store.append(gameChannel('g2'), 0, [created('carol')])
+    await runner.catchUp(progressProjection)
+    const before = await rows()
+    const active = await participants()
+    await db.insert(gamePlayers).values({ gameId: 'orphan', playerId: 'dave' })
+    await runner.rebuild(progressProjection)
+    expect(await rows()).toEqual(before)
+    expect(await participants()).toEqual(active)
+    expect(await runner.catchUp(progressProjection)).toBe(0)
+  })
+
+  it('replays historical Dungeon events when upgrading a Builder-only checkpoint', async () => {
+    await store.append(villageChannel('alice'), 0, [upgraded()])
+    await store.append(gameChannel('g1'), 0, [created(), ended()])
+    await store.append(gameChannel('g2'), 0, [created('bob')])
+    const builderOnly: Projection = {
+      ...progressProjection,
+      version: 1,
+      eventTypes: ['BuildingUpgraded'],
+    }
+    await runner.catchUp(builderOnly)
+    expect(await rows()).toEqual([progress('alice')])
+    expect(await participants()).toEqual([])
+
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([adventurer('alice'), progress('alice')])
+    expect(await participants()).toEqual([{ gameId: 'g2', playerId: 'bob' }])
+    expect(await db.select().from(projections)).toMatchObject([
+      { version: 2, position: await store.lastPosition() },
+    ])
+  })
+
+  it('rolls back counters, membership cleanup and checkpoint if completion is interrupted', async () => {
+    await store.append(gameChannel('g1'), 0, [created(), joined()])
+    await runner.catchUp(progressProjection)
+    const before = await participants()
+    const checkpoint = await db.select().from(projections)
+    await store.append(gameChannel('g1'), 2, [ended('won', ['alice', 'bob'])])
+    const failing: Projection = {
+      ...progressProjection,
+      async apply(event, tx) {
+        await progressProjection.apply(event, tx)
+        if (event.type === 'GameEnded') throw new Error('Interrupted completion')
+      },
+    }
+    await expect(runner.catchUp(failing)).rejects.toThrow('Interrupted completion')
+    expect(await participants()).toEqual(before)
+    expect(await rows()).toEqual([])
+    expect(await db.select().from(projections)).toEqual(checkpoint)
+    await runner.catchUp(progressProjection)
+    expect(await participants()).toEqual([])
+    expect(await rows()).toEqual([adventurer('alice'), adventurer('bob')])
+  })
+
+  it('restores active membership and Builder progress if reconstruction fails after completion', async () => {
+    await store.append(villageChannel('alice'), 0, [upgraded()])
+    await store.append(gameChannel('g1'), 0, [created('bob')])
+    await runner.catchUp(progressProjection)
+    const before = await rows()
+    const active = await participants()
+    const checkpoint = await db.select().from(projections)
+    await store.append(gameChannel('g1'), 1, [ended('lost', ['bob'])])
+    const failing: Projection = {
+      ...progressProjection,
+      async apply(event, tx) {
+        await progressProjection.apply(event, tx)
+        if (event.type === 'GameEnded') throw new Error('Interrupted Dungeon reconstruction')
+      },
+    }
+    await expect(runner.rebuild(failing)).rejects.toThrow('Interrupted Dungeon reconstruction')
+    expect(await rows()).toEqual(before)
+    expect(await participants()).toEqual(active)
+    expect(await db.select().from(projections)).toEqual(checkpoint)
+
+    await runner.rebuild(progressProjection)
+    expect(await rows()).toEqual([progress('alice'), adventurer('bob')])
+    expect(await participants()).toEqual([])
   })
 })

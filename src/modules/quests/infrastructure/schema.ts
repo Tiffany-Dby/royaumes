@@ -16,3 +16,13 @@ export const dailyProgress = quests.table(
   },
   (t) => [primaryKey({ columns: [t.playerId, t.day, t.questId] })],
 )
+
+/** Human membership survives UTC day boundaries and is removed when the expedition ends. */
+export const gamePlayers = quests.table(
+  'game_players',
+  {
+    gameId: text('game_id').notNull(),
+    playerId: text('player_id').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.playerId] })],
+)
