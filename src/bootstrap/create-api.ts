@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { createDungeonModule } from '@/modules/dungeon'
 import { createMarketModule } from '@/modules/market'
+import { createQuestsModule } from '@/modules/quests'
 import { createRankingModule } from '@/modules/ranking'
 import { createRealmModule, createRemoteRealmModule } from '@/modules/realm'
 import { createSystemModule } from '@/modules/system'
@@ -76,6 +77,7 @@ export function createApi({
   const realm = remoteRealm ?? createRealmModule({ store, clock })
   const dungeon = createDungeonModule({ store, db, projections, clock })
   const ranking = createRankingModule({ db, projections })
+  const quests = createQuestsModule({ db, projections })
   // Le Marché déclenche la distribution après ses commandes et ses consultations.
   const market = createMarketModule({
     store,
@@ -96,6 +98,7 @@ export function createApi({
       dungeon.personalData,
       market.personalData,
       ranking.personalData,
+      quests.personalData,
       tavern.personalData,
       createIdentityPersonalData(db),
     ],
