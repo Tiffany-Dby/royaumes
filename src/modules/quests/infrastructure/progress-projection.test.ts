@@ -1,6 +1,7 @@
 import { asc } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { gameChannel } from '@/modules/dungeon/contracts'
+import { offerStream } from '@/modules/market/contracts'
 import { villageChannel } from '@/modules/realm/contracts'
 import { createTestDatabase, type Db } from '@/platform/db/client'
 import {
@@ -16,7 +17,7 @@ import {
 } from '@/platform/projection/projection'
 import { projections } from '@/platform/projection/schema'
 import { progressProjection } from './progress-projection'
-import { dailyProgress, gamePlayers } from './schema'
+import { dailyProgress, gamePlayers, tradeParticipants } from './schema'
 
 const T0 = Date.UTC(2026, 9, 23)
 const NEXT_DAY = Date.UTC(2026, 9, 24)
@@ -54,7 +55,7 @@ describe('Builder progress projection', () => {
     await runner.catchUp(progressProjection)
     expect(await rows()).toEqual([])
     expect(await db.select().from(projections)).toMatchObject([
-      { name: 'quests-progress', version: 2, position: 0 },
+      { name: 'quests-progress', version: 3, position: 0 },
     ])
   })
 
@@ -108,7 +109,7 @@ describe('Builder progress projection', () => {
       { type: 'ResourcesDeposited', data: { at: T0 } },
     ])
     await store.append('dungeon-g1', 0, [{ type: 'GameStarted', data: { rooms: [], at: T0 } }])
-    await store.append('market-o1', 0, [{ type: 'TradeCompleted', data: { at: T0 } }])
+    await store.append('market-o1', 0, [{ type: 'OfferOpened', data: { at: T0 } }])
     await runner.catchUp(progressProjection)
     expect(await rows()).toEqual([])
     expect(await runner.positionOf(progressProjection.name)).toBe(await store.lastPosition())
@@ -273,6 +274,338 @@ const adventurer = (playerId: string, day = '2026-10-23') => ({
   day,
   questId: 'adventurer',
   count: 1,
+})
+
+const published = (offerId = 'o1', sellerId = 'alice', at = T0): NewEvent => ({
+  type: 'OfferPublished',
+  data: {
+    offerId,
+    sellerId,
+    sellerName: `Private name of ${sellerId}`,
+    give: { wood: 60 },
+    want: { stone: 30 },
+    at,
+    expiresAt: at + 24 * 60 * 60_000,
+  },
+})
+
+const opened: NewEvent = { type: 'OfferOpened', data: { at: T0 } }
+const accepted = (buyerId = 'bob', attempt = 1, at = T0): NewEvent => ({
+  type: 'OfferAccepted',
+  data: { buyerId, buyerName: `Private name of ${buyerId}`, attempt, at },
+})
+const paymentRefused = (buyerId = 'bob'): NewEvent => ({
+  type: 'PaymentRefused',
+  data: { buyerId, missing: { stone: 30 }, at: T0 },
+})
+const completed = (at = T0): NewEvent => ({ type: 'TradeCompleted', data: { at } })
+const trades = () => db.select().from(tradeParticipants).orderBy(asc(tradeParticipants.offerId))
+const merchant = (playerId: string, day = '2026-10-23') => ({
+  playerId,
+  day,
+  questId: 'merchant',
+  count: 1,
+})
+
+describe('Merchant progress projection', () => {
+  it('credits both participants only after a successful trade and removes its context', async () => {
+    await store.append(offerStream('o1'), 0, [published()])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([])
+    expect(await trades()).toEqual([{ offerId: 'o1', sellerId: 'alice', buyerId: null }])
+    await store.append(offerStream('o1'), 1, [opened, accepted()])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([])
+    expect(await trades()).toEqual([{ offerId: 'o1', sellerId: 'alice', buyerId: 'bob' }])
+    await store.append(offerStream('o1'), 3, [completed()])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([merchant('alice'), merchant('bob')])
+    expect(await trades()).toEqual([])
+  })
+
+  it.each([
+    { failedBuyers: ['bob'] },
+    { failedBuyers: ['bob', 'dave'] },
+    { failedBuyers: ['bob', 'bob'] },
+  ])(
+    'clears each failed buyer in $failedBuyers before crediting Carol',
+    async ({ failedBuyers }) => {
+      await store.append(offerStream('o1'), 0, [published(), opened])
+      let version = 2
+      for (const [index, buyer] of failedBuyers.entries()) {
+        await store.append(offerStream('o1'), version, [
+          accepted(buyer, index + 1),
+          paymentRefused(buyer),
+        ])
+        version += 2
+        await runner.catchUp(progressProjection)
+        expect(await rows()).toEqual([])
+        expect(await trades()).toEqual([{ offerId: 'o1', sellerId: 'alice', buyerId: null }])
+      }
+      await store.append(offerStream('o1'), version, [
+        accepted('carol', failedBuyers.length + 1),
+        completed(),
+      ])
+      await runner.catchUp(progressProjection)
+      expect(await rows()).toEqual([merchant('alice'), merchant('carol')])
+      expect(await trades()).toEqual([])
+    },
+  )
+
+  it('credits a buyer who succeeds after their own earlier failed payment', async () => {
+    await store.append(offerStream('o1'), 0, [
+      published(),
+      opened,
+      accepted(),
+      paymentRefused(),
+      accepted('bob', 2),
+      completed(),
+    ])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([merchant('alice'), merchant('bob')])
+  })
+
+  it.each([
+    { type: 'OfferRejected', data: { missing: { wood: 500 }, at: T0 } },
+    { type: 'OfferWithdrawn', data: { reason: 'seller', at: T0 } },
+    { type: 'OfferWithdrawn', data: { reason: 'expired', at: T0 + 24 * 60 * 60_000 } },
+  ])('cleans up $type without granting progress', async (terminal) => {
+    await store.append(offerStream('o1'), 0, [
+      published(),
+      ...(terminal.type === 'OfferRejected' ? [] : [opened]),
+      terminal,
+    ])
+    await runner.catchUp(progressProjection)
+    expect(await trades()).toEqual([])
+    expect(await rows()).toEqual([])
+  })
+
+  it('cleans up an offer withdrawn after payment refusal', async () => {
+    await store.append(offerStream('o1'), 0, [
+      published(),
+      opened,
+      accepted(),
+      paymentRefused(),
+      { type: 'OfferWithdrawn', data: { reason: 'expired', at: NEXT_DAY } },
+    ])
+    await runner.catchUp(progressProjection)
+    expect(await trades()).toEqual([])
+    expect(await rows()).toEqual([])
+  })
+
+  it('retains participants across midnight and uses completion gameplay time', async () => {
+    await store.append(offerStream('o1'), 0, [
+      published('o1', 'alice', NEXT_DAY - 1000),
+      { type: 'OfferOpened', data: { at: NEXT_DAY - 1000 } },
+      accepted('bob', 1, NEXT_DAY - 1),
+    ])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([])
+    expect(await trades()).toEqual([{ offerId: 'o1', sellerId: 'alice', buyerId: 'bob' }])
+    await store.append(offerStream('o1'), 3, [completed(NEXT_DAY)])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([merchant('alice', '2026-10-24'), merchant('bob', '2026-10-24')])
+    expect(await trades()).toEqual([])
+  })
+
+  it('isolates trades, players and days while capping Merchant progress at one', async () => {
+    for (const [offerId, seller, buyer, at] of [
+      ['o1', 'alice', 'bob', T0],
+      ['o2', 'alice', 'carol', T0],
+      ['o3', 'dave', 'bob', T0],
+      ['o4', 'alice', 'bob', NEXT_DAY],
+    ] as const) {
+      await store.append(offerStream(offerId), 0, [
+        published(offerId, seller, at),
+        { type: 'OfferOpened', data: { at } },
+        accepted(buyer, 1, at),
+        completed(at),
+      ])
+    }
+    await store.append(offerStream('o5'), 0, [published('o5', 'eric')])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([
+      merchant('alice'),
+      merchant('alice', '2026-10-24'),
+      merchant('bob'),
+      merchant('bob', '2026-10-24'),
+      merchant('carol'),
+      merchant('dave'),
+    ])
+    expect(await trades()).toEqual([{ offerId: 'o5', sellerId: 'eric', buyerId: null }])
+  })
+
+  it('ignores Market event types on unexpected or empty Market streams', async () => {
+    for (const stream of ['village-alice', 'dungeon-g1', 'other-market-o1', 'market', 'market-']) {
+      await store.append(
+        stream,
+        0,
+        [
+          'OfferPublished',
+          'OfferAccepted',
+          'PaymentRefused',
+          'TradeCompleted',
+          'OfferRejected',
+          'OfferWithdrawn',
+        ].map((type) => ({ type, data: {} })),
+      )
+    }
+    await runner.catchUp(progressProjection)
+    expect(await trades()).toEqual([])
+    expect(await rows()).toEqual([])
+    expect(await runner.positionOf(progressProjection.name)).toBe(await store.lastPosition())
+  })
+
+  it('does not duplicate participants or credits during concurrent and repeated catch-up', async () => {
+    await store.append(offerStream('o1'), 0, [published(), opened, accepted()])
+    await Promise.all([runner.catchUp(progressProjection), runner.catchUp(progressProjection)])
+    expect(await trades()).toEqual([{ offerId: 'o1', sellerId: 'alice', buyerId: 'bob' }])
+    await store.append(offerStream('o1'), 3, [completed()])
+    await Promise.all([runner.catchUp(progressProjection), runner.catchUp(progressProjection)])
+    expect(await rows()).toEqual([merchant('alice'), merchant('bob')])
+    expect(await trades()).toEqual([])
+    expect(await runner.catchUp(progressProjection)).toBe(0)
+  })
+
+  it.each([
+    {
+      name: 'missing seller',
+      events: [{ ...published(), data: { ...published().data, sellerId: null } }],
+    },
+    { name: 'mismatched offer identifier', events: [published('other')] },
+    { name: 'missing publication', events: [accepted()] },
+    {
+      name: 'missing buyer',
+      events: [published(), opened, { ...accepted(), data: { ...accepted().data, buyerId: '' } }],
+    },
+    { name: 'invalid attempt', events: [published(), opened, accepted('bob', 0)] },
+    { name: 'self acceptance', events: [published(), opened, accepted('alice')] },
+    {
+      name: 'acceptance during payment',
+      events: [published(), opened, accepted(), accepted('carol', 2)],
+    },
+    {
+      name: 'mismatched refusal',
+      events: [published(), opened, accepted(), paymentRefused('carol')],
+    },
+    { name: 'completion without buyer', events: [published(), completed()] },
+    {
+      name: 'completion after refusal',
+      events: [published(), opened, accepted(), paymentRefused(), completed()],
+    },
+    { name: 'completion without publication', events: [completed()] },
+    {
+      name: 'withdrawal during payment',
+      events: [
+        published(),
+        opened,
+        accepted(),
+        { type: 'OfferWithdrawn', data: { reason: 'seller', at: T0 } },
+      ],
+    },
+  ])('rejects $name rather than advancing past invalid attribution', async ({ events }) => {
+    await store.append(offerStream('o1'), 0, events)
+    await expect(runner.catchUp(progressProjection)).rejects.toThrow()
+    expect(await trades()).toEqual([])
+    expect(await rows()).toEqual([])
+    expect(await db.select().from(projections)).toEqual([])
+  })
+
+  it.each([undefined, null, '2026-10-23', Number.MAX_VALUE])(
+    'preserves participants and checkpoint for invalid completion time %s',
+    async (at) => {
+      await store.append(offerStream('o1'), 0, [published(), opened, accepted()])
+      await runner.catchUp(progressProjection)
+      const before = await trades()
+      const checkpoint = await db.select().from(projections)
+      await store.append(offerStream('o1'), 3, [{ type: 'TradeCompleted', data: { at } }])
+      await expect(runner.catchUp(progressProjection)).rejects.toThrow(RangeError)
+      expect(await rows()).toEqual([])
+      expect(await trades()).toEqual(before)
+      expect(await db.select().from(projections)).toEqual(checkpoint)
+    },
+  )
+
+  it('rebuilds active Market context without changing Builder or Dungeon data', async () => {
+    await store.append(villageChannel('dave'), 0, [upgraded()])
+    await store.append(gameChannel('g1'), 0, [created('carol')])
+    await store.append(offerStream('o1'), 0, [published(), opened, accepted(), completed()])
+    await store.append(offerStream('o2'), 0, [published('o2'), opened, accepted('carol')])
+    await runner.catchUp(progressProjection)
+    const before = await rows()
+    const active = await trades()
+    const dungeon = await participants()
+    await db.insert(tradeParticipants).values({ offerId: 'orphan', sellerId: 'eric' })
+    await runner.rebuild(progressProjection)
+    expect(await rows()).toEqual(before)
+    expect(await trades()).toEqual(active)
+    expect(await participants()).toEqual(dungeon)
+    expect(await runner.catchUp(progressProjection)).toBe(0)
+  })
+
+  it('replays historical Market events when upgrading a Builder and Dungeon checkpoint', async () => {
+    await store.append(villageChannel('dave'), 0, [upgraded()])
+    await store.append(gameChannel('g1'), 0, [created('eric'), ended('lost', ['eric'])])
+    await store.append(offerStream('o1'), 0, [
+      published(),
+      opened,
+      accepted(),
+      paymentRefused(),
+      accepted('carol', 2),
+      completed(),
+    ])
+    await store.append(offerStream('o2'), 0, [published('o2')])
+    const previous: Projection = {
+      ...progressProjection,
+      version: 2,
+      eventTypes: ['BuildingUpgraded', 'GameCreated', 'PlayerJoined', 'GameEnded'],
+    }
+    await runner.catchUp(previous)
+    expect(await rows()).toEqual([progress('dave'), adventurer('eric')])
+    expect(await trades()).toEqual([])
+    await runner.catchUp(progressProjection)
+    expect(await rows()).toEqual([
+      merchant('alice'),
+      merchant('carol'),
+      progress('dave'),
+      adventurer('eric'),
+    ])
+    expect(await trades()).toEqual([{ offerId: 'o2', sellerId: 'alice', buyerId: null }])
+    expect(await db.select().from(projections)).toMatchObject([
+      { version: 3, position: await store.lastPosition() },
+    ])
+  })
+
+  it.each(['catchUp', 'rebuild'] as const)(
+    'rolls back Market completion and all derived data if %s fails',
+    async (mode) => {
+      await store.append(villageChannel('dave'), 0, [upgraded()])
+      await store.append(gameChannel('g1'), 0, [created('carol')])
+      await store.append(offerStream('o1'), 0, [published(), opened, accepted()])
+      await runner.catchUp(progressProjection)
+      const before = await rows()
+      const active = await trades()
+      const dungeon = await participants()
+      const checkpoint = await db.select().from(projections)
+      await store.append(offerStream('o1'), 3, [completed()])
+      const failing: Projection = {
+        ...progressProjection,
+        async apply(event, tx) {
+          await progressProjection.apply(event, tx)
+          if (event.type === 'TradeCompleted') throw new Error('Interrupted Market completion')
+        },
+      }
+      await expect(runner[mode](failing)).rejects.toThrow('Interrupted Market completion')
+      expect(await rows()).toEqual(before)
+      expect(await trades()).toEqual(active)
+      expect(await participants()).toEqual(dungeon)
+      expect(await db.select().from(projections)).toEqual(checkpoint)
+      await runner[mode](progressProjection)
+      expect(await rows()).toEqual([merchant('alice'), merchant('bob'), progress('dave')])
+      expect(await trades()).toEqual([])
+      expect(await participants()).toEqual(dungeon)
+    },
+  )
 })
 
 describe('Adventurer progress projection', () => {
@@ -481,7 +814,7 @@ describe('Adventurer progress projection', () => {
     expect(await rows()).toEqual([adventurer('alice'), progress('alice')])
     expect(await participants()).toEqual([{ gameId: 'g2', playerId: 'bob' }])
     expect(await db.select().from(projections)).toMatchObject([
-      { version: 2, position: await store.lastPosition() },
+      { version: 3, position: await store.lastPosition() },
     ])
   })
 

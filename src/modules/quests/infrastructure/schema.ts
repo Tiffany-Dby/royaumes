@@ -26,3 +26,10 @@ export const gamePlayers = quests.table(
   },
   (t) => [primaryKey({ columns: [t.gameId, t.playerId] })],
 )
+
+/** Current trade attribution survives day boundaries; terminal offers need no context. */
+export const tradeParticipants = quests.table('trade_participants', {
+  offerId: text('offer_id').primaryKey(),
+  sellerId: text('seller_id').notNull(),
+  buyerId: text('buyer_id'),
+})

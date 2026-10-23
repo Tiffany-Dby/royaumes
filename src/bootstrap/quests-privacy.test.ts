@@ -1,8 +1,13 @@
 import { asc, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { gameChannel } from '@/modules/dungeon/contracts'
+import { offerStream } from '@/modules/market/contracts'
 import { progressProjection } from '@/modules/quests/infrastructure/progress-projection'
-import { dailyProgress, gamePlayers } from '@/modules/quests/infrastructure/schema'
+import {
+  dailyProgress,
+  gamePlayers,
+  tradeParticipants,
+} from '@/modules/quests/infrastructure/schema'
 import { villageChannel } from '@/modules/realm/contracts'
 import { session, user } from '@/platform/auth/schema'
 import { createEventStore } from '@/platform/event-store/event-store'
@@ -50,10 +55,215 @@ async function completeDungeon(api: TestApi, gameId: string, heroIds: string[]) 
   ])
 }
 
+async function marketWithVillages() {
+  const api = await createTestApi()
+  for (const player of ['alice', 'bob', 'carol']) {
+    expect(
+      (await api.post('/api/realm/village', { name: `${player}'s private village` }, player))
+        .status,
+    ).toBe(201)
+  }
+  return api
+}
+
+async function publishMarket(
+  api: TestApi,
+  seller = 'alice',
+  give = { wood: 10 },
+  want = { stone: 5 },
+) {
+  const response = await api.post('/api/market/offers', { give, want }, seller)
+  expect(response.status).toBe(201)
+  return response.json() as Promise<{ offerId: string; view: { status: string } }>
+}
+
+/** Record the published acceptance payload without settling payment to inspect pending attribution. */
+async function recordAcceptance(api: TestApi, offerId: string, buyerId: string) {
+  const store = createEventStore(api.db)
+  const history = await store.read(offerStream(offerId))
+  await store.append(offerStream(offerId), history.at(-1)?.version ?? 0, [
+    {
+      type: 'OfferAccepted',
+      data: { buyerId, buyerName: buyerId, attempt: 1, at: Date.UTC(2026, 0, 1) },
+    },
+  ])
+}
+
+describe('Merchant progress and personal data integration', () => {
+  it.each([1, 2])(
+    'credits Alice and Carol after %s real failed payments by Bob',
+    async (attempts) => {
+      const api = await marketWithVillages()
+      // Reserving Bob's stone makes his payment fail while Carol still has enough.
+      const reserved = await api.post(
+        '/api/market/offers',
+        { give: { stone: 40 }, want: { wood: 10 } },
+        'bob',
+      )
+      expect(reserved.status).toBe(201)
+      const bobOffer = await reserved.json()
+      expect(bobOffer.view.status).toBe('open')
+      const { offerId } = await publishMarket(api, 'alice', { wood: 60 }, { stone: 30 })
+      for (let i = 0; i < attempts; i++) {
+        const response = await api.post(`/api/market/offers/${offerId}/accept`, {}, 'bob')
+        expect(response.status).toBe(200)
+        expect((await response.json()).view).toMatchObject({
+          status: 'open',
+          missing: { stone: 20 },
+        })
+        expect((await exportSections(api)).quests.progress).toEqual([])
+        expect((await exportSections(api, 'bob')).quests.marketParticipations).toEqual([
+          { offerId: bobOffer.offerId, role: 'seller' },
+        ])
+        expect(
+          await api.db
+            .select()
+            .from(tradeParticipants)
+            .where(eq(tradeParticipants.offerId, offerId)),
+        ).toEqual([{ offerId, sellerId: 'alice', buyerId: null }])
+      }
+      expect(
+        (await api.post(`/api/market/offers/${bobOffer.offerId}/withdraw`, {}, 'bob')).status,
+      ).toBe(200)
+      const success = await api.post(`/api/market/offers/${offerId}/accept`, {}, 'carol')
+      expect(success.status).toBe(200)
+      expect((await success.json()).view.status).toBe('completed')
+      for (const player of ['alice', 'carol']) {
+        expect((await exportSections(api, player)).quests).toEqual({
+          progress: [{ day: '2026-01-01', questId: 'merchant', count: 1 }],
+          dungeonParticipations: [],
+          marketParticipations: [],
+        })
+      }
+      expect((await exportSections(api, 'bob')).quests).toEqual({
+        progress: [],
+        dungeonParticipations: [],
+        marketParticipations: [],
+      })
+      const events = await createEventStore(api.db).read(offerStream(offerId))
+      expect(events.filter((event) => event.type === 'PaymentRefused')).toHaveLength(attempts)
+      expect(events.filter((event) => event.type === 'TradeCompleted')).toHaveLength(1)
+    },
+  )
+
+  it.each(['rejected', 'withdrawn', 'expired'])(
+    'cleans up a real %s offer without progress',
+    async (outcome) => {
+      const api = await marketWithVillages()
+      const { offerId, view } = await publishMarket(api, 'alice', {
+        wood: outcome === 'rejected' ? 500 : 10,
+      })
+      if (outcome === 'rejected') expect(view.status).toBe('rejected')
+      else if (outcome === 'withdrawn') {
+        expect((await api.post(`/api/market/offers/${offerId}/withdraw`, {})).status).toBe(200)
+      } else {
+        api.advance(24 * 60)
+        expect((await api.get('/api/market/offers')).status).toBe(200)
+      }
+      expect((await exportSections(api)).quests).toEqual({
+        progress: [],
+        dungeonParticipations: [],
+        marketParticipations: [],
+      })
+      expect(await api.db.select().from(tradeParticipants)).toEqual([])
+    },
+  )
+
+  it("exports only the requesting participant's role without the counterparty or resource amounts", async () => {
+    const api = await marketWithVillages()
+    const shared = await publishMarket(api)
+    const unrelated = await publishMarket(api, 'carol')
+    await recordAcceptance(api, shared.offerId, 'bob')
+    for (const [player, role] of [
+      ['alice', 'seller'],
+      ['bob', 'buyer'],
+    ] as const) {
+      const quests = (await exportSections(api, player)).quests
+      expect(quests).toEqual({
+        progress: [],
+        dungeonParticipations: [],
+        marketParticipations: [{ offerId: shared.offerId, role }],
+      })
+      expect(JSON.stringify(quests)).not.toContain('buyerId')
+      expect(JSON.stringify(quests)).not.toContain('sellerId')
+      expect(JSON.stringify(quests)).not.toContain('wood')
+      expect(JSON.stringify(quests)).not.toContain('private village')
+    }
+    expect((await exportSections(api, 'carol')).quests.marketParticipations).toEqual([
+      { offerId: unrelated.offerId, role: 'seller' },
+    ])
+  })
+
+  it.each([false, true])(
+    'rebuilds pseudonymous Market progress and pending roles after deletion (projected before deletion: %s)',
+    async (projectedBeforeDeletion) => {
+      const api = await marketWithVillages()
+      await api.db.insert(user).values([
+        { id: 'alice', name: 'Alice Private', email: 'alice@example.test' },
+        { id: 'bob', name: 'Bob Private', email: 'bob@example.test' },
+        { id: 'carol', name: 'Carol Private', email: 'carol@example.test' },
+      ])
+      const completed = await publishMarket(api)
+      const success = await api.post(`/api/market/offers/${completed.offerId}/accept`, {}, 'carol')
+      expect(success.status).toBe(200)
+      expect((await success.json()).view.status).toBe('completed')
+      const pending = await publishMarket(api, 'bob')
+      await recordAcceptance(api, pending.offerId, 'alice')
+      if (projectedBeforeDeletion) await exportSections(api)
+      const response = await api.api.request('/api/account', {
+        method: 'DELETE',
+        headers: { 'x-test-user': 'alice' },
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ eventsRewritten: 3 })
+      const runner = createProjectionRunner(api.db)
+      await runner.catchUp(progressProjection)
+      const retainedProgress = await api.db
+        .select()
+        .from(dailyProgress)
+        .orderBy(asc(dailyProgress.playerId))
+      const retainedTrades = await api.db.select().from(tradeParticipants)
+      expect(retainedProgress).toEqual([
+        { playerId: 'alice', day: '2026-01-01', questId: 'merchant', count: 1 },
+        { playerId: 'carol', day: '2026-01-01', questId: 'merchant', count: 1 },
+      ])
+      expect(retainedTrades).toEqual([
+        { offerId: pending.offerId, sellerId: 'bob', buyerId: 'alice' },
+      ])
+      await runner.rebuild(progressProjection)
+      expect(
+        await api.db.select().from(dailyProgress).orderBy(asc(dailyProgress.playerId)),
+      ).toEqual(retainedProgress)
+      expect(await api.db.select().from(tradeParticipants)).toEqual(retainedTrades)
+      expect(await api.db.select().from(user).where(eq(user.id, 'alice'))).toEqual([])
+      expect(await api.db.select().from(user).where(eq(user.id, 'bob'))).toHaveLength(1)
+      const store = createEventStore(api.db)
+      expect((await store.read(offerStream(completed.offerId)))[0].data.sellerName).toBe(
+        ERASED_NAME,
+      )
+      expect(
+        (await store.read(offerStream(pending.offerId))).find(
+          (event) => event.type === 'OfferAccepted',
+        )?.data.buyerName,
+      ).toBe(ERASED_NAME)
+      expect((await exportSections(api, 'bob')).quests).toEqual({
+        progress: [],
+        dungeonParticipations: [],
+        marketParticipations: [{ offerId: pending.offerId, role: 'seller' }],
+      })
+      expect(await runner.catchUp(progressProjection)).toBe(0)
+    },
+  )
+})
+
 describe('Quests personal data integration', () => {
   it('exports an empty progress list when the player has no progress', async () => {
     const api = await createTestApi()
-    expect((await exportSections(api)).quests).toEqual({ progress: [], dungeonParticipations: [] })
+    expect((await exportSections(api)).quests).toEqual({
+      progress: [],
+      dungeonParticipations: [],
+      marketParticipations: [],
+    })
   })
 
   it('catches up and exports only the requested player across all recorded days', async () => {
@@ -72,14 +282,17 @@ describe('Quests personal data integration', () => {
         { day: '2026-01-02', questId: 'builder', count: 1 },
       ],
       dungeonParticipations: [],
+      marketParticipations: [],
     })
     expect((await exportSections(api, 'bob')).quests).toEqual({
       progress: [{ day: '2026-01-01', questId: 'builder', count: 1 }],
       dungeonParticipations: [],
+      marketParticipations: [],
     })
     expect((await exportSections(api, 'carol')).quests).toEqual({
       progress: [],
       dungeonParticipations: [],
+      marketParticipations: [],
     })
     expect(JSON.stringify(alice)).not.toContain('bob')
     expect(JSON.stringify(alice)).not.toContain('private village')
@@ -92,9 +305,12 @@ describe('Quests personal data integration', () => {
     const gameResponse = await api.post('/api/dungeon/games', {})
     expect(gameResponse.status).toBe(201)
     const { gameId } = await gameResponse.json()
-    expect(
-      (await api.post('/api/market/offers', { give: { wood: 10 }, want: { stone: 5 } })).status,
-    ).toBe(201)
+    const offerResponse = await api.post('/api/market/offers', {
+      give: { wood: 10 },
+      want: { stone: 5 },
+    })
+    expect(offerResponse.status).toBe(201)
+    const { offerId } = await offerResponse.json()
     expect((await api.post('/api/tavern/messages', { body: 'A private message' })).status).toBe(201)
 
     const sections = await exportSections(api)
@@ -116,6 +332,7 @@ describe('Quests personal data integration', () => {
     expect(sections.quests).toEqual({
       progress: [{ day: '2026-01-01', questId: 'builder', count: 1 }],
       dungeonParticipations: [{ gameId }],
+      marketParticipations: [{ offerId, role: 'seller' }],
     })
   })
 
@@ -180,18 +397,25 @@ describe('Quests personal data integration', () => {
     const bobOnly = await openDungeon(api, 'bob')
     const carolOnly = await openDungeon(api, 'carol')
     const alice = (await exportSections(api)).quests
-    expect(alice).toEqual({ progress: [], dungeonParticipations: [{ gameId: shared }] })
+    expect(alice).toEqual({
+      progress: [],
+      dungeonParticipations: [{ gameId: shared }],
+      marketParticipations: [],
+    })
     expect((await exportSections(api, 'bob')).quests).toEqual({
       progress: [],
       dungeonParticipations: [shared, bobOnly].sort().map((gameId) => ({ gameId })),
+      marketParticipations: [],
     })
     expect((await exportSections(api, 'carol')).quests).toEqual({
       progress: [],
       dungeonParticipations: [{ gameId: carolOnly }],
+      marketParticipations: [],
     })
     expect((await exportSections(api, 'companion-1')).quests).toEqual({
       progress: [],
       dungeonParticipations: [],
+      marketParticipations: [],
     })
     expect(JSON.stringify(alice)).not.toContain('bob')
     expect(JSON.stringify(alice)).not.toContain('seed')
@@ -207,6 +431,7 @@ describe('Quests personal data integration', () => {
       expect((await exportSections(api, playerId)).quests).toEqual({
         progress: [{ day: '2026-01-01', questId: 'adventurer', count: 1 }],
         dungeonParticipations: [],
+        marketParticipations: [],
       })
     }
   })

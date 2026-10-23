@@ -1,14 +1,14 @@
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, or } from 'drizzle-orm'
 import type { Db } from '@/platform/db/client'
 import type { PersonalDataContributor } from '@/platform/privacy/privacy'
 import type { ProjectionRunner } from '@/platform/projection/projection'
 import { progressProjection } from './infrastructure/progress-projection'
-import { dailyProgress, gamePlayers } from './infrastructure/schema'
+import { dailyProgress, gamePlayers, tradeParticipants } from './infrastructure/schema'
 
 /**
- * Exports the player's progress and outstanding Dungeon participation without copying
- * names or other players' data. Under ADR-0008 and ADR-0010, replay-essential player
- * references remain after identity deletion; participation is removed when a game ends.
+ * Exports the player's progress and outstanding Dungeon and Market participation without
+ * names, counterparties or resource amounts. Under ADR-0008 and ADR-0010, replay-essential
+ * player references remain after identity deletion; terminal activities remove their context.
  * Retained data is pseudonymous, not fully anonymous or physically erased. No redact
  * or erase hook is needed for these name-free records: replaying the rewritten journal
  * produces the same retained data.
@@ -35,7 +35,18 @@ export function createQuestsPersonalData(
         .from(gamePlayers)
         .where(eq(gamePlayers.playerId, playerId))
         .orderBy(asc(gamePlayers.gameId))
-      return { progress, dungeonParticipations }
+      const trades = await db
+        .select({ offerId: tradeParticipants.offerId, sellerId: tradeParticipants.sellerId })
+        .from(tradeParticipants)
+        .where(
+          or(eq(tradeParticipants.sellerId, playerId), eq(tradeParticipants.buyerId, playerId)),
+        )
+        .orderBy(asc(tradeParticipants.offerId))
+      const marketParticipations = trades.map((trade) => ({
+        offerId: trade.offerId,
+        role: trade.sellerId === playerId ? 'seller' : 'buyer',
+      }))
+      return { progress, dungeonParticipations, marketParticipations }
     },
   }
 }

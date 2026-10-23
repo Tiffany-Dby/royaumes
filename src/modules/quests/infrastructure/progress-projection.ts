@@ -1,11 +1,21 @@
 import { eq, sql } from 'drizzle-orm'
 import { GAME_CHANNEL_PREFIX } from '@/modules/dungeon/contracts'
+import { OFFER_STREAM_PREFIX } from '@/modules/market/contracts'
 import { VILLAGE_CHANNEL_PREFIX } from '@/modules/realm/contracts'
 import type { StoredEvent } from '@/platform/event-store/event-store'
 import type { DbTransaction, Projection } from '@/platform/projection/projection'
 import { QUESTS, type QuestId } from '../domain/catalog'
 import { type QuestDay, questDayAt } from '../domain/quest-day'
-import { dailyProgress, gamePlayers } from './schema'
+import { dailyProgress, gamePlayers, tradeParticipants } from './schema'
+
+const MARKET_EVENT_TYPES = [
+  'OfferPublished',
+  'OfferAccepted',
+  'PaymentRefused',
+  'TradeCompleted',
+  'OfferRejected',
+  'OfferWithdrawn',
+]
 
 /** Gameplay time remains authoritative when events are recorded or relayed later. */
 function gameplayDay(event: StoredEvent): QuestDay {
@@ -33,11 +43,89 @@ async function recordProgress(
     })
 }
 
-/** The runner commits progress, human membership and the checkpoint in one transaction. */
+/** Market correlates transfer replies before publishing events; only current attribution is needed. */
+async function applyMarketEvent(event: StoredEvent, offerId: string, tx: DbTransaction) {
+  if (event.type === 'OfferPublished') {
+    if (event.data.offerId !== offerId)
+      throw new Error('OfferPublished has a mismatched offer identifier')
+    const sellerId = event.data.sellerId
+    if (typeof sellerId !== 'string' || sellerId.trim().length === 0) {
+      throw new Error('OfferPublished requires a nonempty seller identifier')
+    }
+    await tx.insert(tradeParticipants).values({ offerId, sellerId })
+    return
+  }
+
+  const [trade] = await tx
+    .select()
+    .from(tradeParticipants)
+    .where(eq(tradeParticipants.offerId, offerId))
+  if (!trade) throw new Error(`${event.type} requires Market participation context`)
+
+  switch (event.type) {
+    case 'OfferAccepted':
+    case 'PaymentRefused': {
+      const buyerId = event.data.buyerId
+      if (typeof buyerId !== 'string' || buyerId.trim().length === 0) {
+        throw new Error(`${event.type} requires a nonempty buyer identifier`)
+      }
+      if (event.type === 'OfferAccepted') {
+        const attempt = event.data.attempt
+        if (typeof attempt !== 'number' || !Number.isInteger(attempt) || attempt <= 0) {
+          throw new Error('OfferAccepted requires a positive payment attempt')
+        }
+        if (trade.buyerId !== null || buyerId === trade.sellerId) {
+          throw new Error('OfferAccepted requires a different buyer and no pending payment')
+        }
+        await tx
+          .update(tradeParticipants)
+          .set({ buyerId })
+          .where(eq(tradeParticipants.offerId, offerId))
+      } else {
+        if (trade.buyerId !== buyerId)
+          throw new Error('PaymentRefused must identify the current buyer')
+        await tx
+          .update(tradeParticipants)
+          .set({ buyerId: null })
+          .where(eq(tradeParticipants.offerId, offerId))
+      }
+      return
+    }
+
+    case 'TradeCompleted':
+      if (!trade.buyerId) throw new Error('TradeCompleted requires a successful buyer')
+      await recordProgress(tx, [trade.sellerId, trade.buyerId], gameplayDay(event), 'merchant')
+      break
+
+    case 'OfferRejected':
+    case 'OfferWithdrawn':
+      if (trade.buyerId !== null) throw new Error(`${event.type} cannot discard a pending buyer`)
+      if (
+        event.type === 'OfferWithdrawn' &&
+        event.data.reason !== 'seller' &&
+        event.data.reason !== 'expired'
+      ) {
+        throw new Error('OfferWithdrawn requires a seller or expired reason')
+      }
+      break
+
+    default:
+      throw new Error(`Unsupported Market event ${event.type}`)
+  }
+  await tx.delete(tradeParticipants).where(eq(tradeParticipants.offerId, offerId))
+}
+
+/** The runner commits progress, participant context and the checkpoint in one transaction. */
 export const progressProjection: Projection = {
   name: 'quests-progress',
-  version: 2,
-  eventTypes: ['BuildingUpgraded', 'GameCreated', 'PlayerJoined', 'GameEnded'],
+  version: 3,
+  eventTypes: [
+    'BuildingUpgraded',
+    'GameCreated',
+    'PlayerJoined',
+    'GameEnded',
+    ...MARKET_EVENT_TYPES,
+  ],
 
   async apply(event, tx) {
     if (event.type === 'BuildingUpgraded') {
@@ -45,6 +133,14 @@ export const progressProjection: Projection = {
       const playerId = event.stream.slice(VILLAGE_CHANNEL_PREFIX.length)
       if (!playerId) return
       await recordProgress(tx, [playerId], gameplayDay(event), 'builder')
+      return
+    }
+
+    if (MARKET_EVENT_TYPES.includes(event.type)) {
+      if (!event.stream.startsWith(OFFER_STREAM_PREFIX)) return
+      const offerId = event.stream.slice(OFFER_STREAM_PREFIX.length)
+      if (!offerId) return
+      await applyMarketEvent(event, offerId, tx)
       return
     }
 
@@ -97,6 +193,7 @@ export const progressProjection: Projection = {
   },
 
   async reset(tx) {
+    await tx.delete(tradeParticipants)
     await tx.delete(gamePlayers)
     await tx.delete(dailyProgress)
   },
