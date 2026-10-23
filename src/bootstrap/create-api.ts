@@ -77,7 +77,7 @@ export function createApi({
   const realm = remoteRealm ?? createRealmModule({ store, clock })
   const dungeon = createDungeonModule({ store, db, projections, clock })
   const ranking = createRankingModule({ db, projections })
-  const quests = createQuestsModule({ db, projections })
+  const quests = createQuestsModule({ db, projections, store, clock })
   // Le Marché déclenche la distribution après ses commandes et ses consultations.
   const market = createMarketModule({
     store,
@@ -179,6 +179,8 @@ export function createApi({
   app.use('/realm/*', requireUser(auth))
   app.use('/dungeon/*', requireUser(auth))
   app.use('/ranking/*', requireUser(auth))
+  app.use('/quests', requireUser(auth))
+  app.use('/quests/*', requireUser(auth))
   app.use('/market/*', requireUser(auth))
   app.use('/tavern/*', requireUser(auth))
   app.use('/account', requireUser(auth))
@@ -192,6 +194,7 @@ export function createApi({
     .route('/realm', realm.api)
     .route('/dungeon', dungeon.api)
     .route('/ranking', ranking.api)
+    .route('/quests', quests.api)
     .route('/market', market.api)
     .route('/tavern', tavern.api)
     .route('/account', createPrivacyApi(privacy))
