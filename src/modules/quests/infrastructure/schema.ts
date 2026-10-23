@@ -5,6 +5,11 @@ import type { QuestDay } from '../domain/quest-day'
 /** Quests owns its derived progress; gameplay events remain in the platform journal. */
 export const quests = pgSchema('quests')
 
+/** Village existence survives identity deletion under the current Village lifecycle. */
+export const villages = quests.table('villages', {
+  playerId: text('player_id').primaryKey(),
+})
+
 /** One capped counter per player, UTC day and quest. No identifying names are copied. */
 export const dailyProgress = quests.table(
   'daily_progress',

@@ -108,6 +108,7 @@ export function createApi({
   // Gestionnaires de messages, déclarés par les modules et confiés au distributeur.
   dispatcher.register(realm.handlers)
   dispatcher.register(market.handlers)
+  dispatcher.register(quests.handlers)
 
   // Règles d'accès aux canaux temps réel, déclarées par les modules.
   const policies: ChannelPolicy[] = [

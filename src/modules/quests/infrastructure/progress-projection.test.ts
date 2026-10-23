@@ -17,7 +17,7 @@ import {
 } from '@/platform/projection/projection'
 import { projections } from '@/platform/projection/schema'
 import { progressProjection } from './progress-projection'
-import { dailyProgress, gamePlayers, tradeParticipants } from './schema'
+import { dailyProgress, gamePlayers, tradeParticipants, villages } from './schema'
 
 const T0 = Date.UTC(2026, 9, 23)
 const NEXT_DAY = Date.UTC(2026, 9, 24)
@@ -55,7 +55,7 @@ describe('Builder progress projection', () => {
     await runner.catchUp(progressProjection)
     expect(await rows()).toEqual([])
     expect(await db.select().from(projections)).toMatchObject([
-      { name: 'quests-progress', version: 3, position: 0 },
+      { name: 'quests-progress', version: 4, position: 0 },
     ])
   })
 
@@ -103,7 +103,7 @@ describe('Builder progress projection', () => {
     ])
   })
 
-  it('ignores unrelated events while advancing the checkpoint', async () => {
+  it('does not increment Builder progress for other events while advancing the checkpoint', async () => {
     await store.append(villageChannel('alice'), 0, [
       { type: 'VillageFounded', data: { name: 'Private village', at: T0 } },
       { type: 'ResourcesDeposited', data: { at: T0 } },
@@ -231,6 +231,62 @@ describe('Builder progress projection', () => {
     await later.catchUp(progressProjection)
     expect(await rows()).toEqual([progress('alice'), progress('bob')])
     expect(await later.positionOf(progressProjection.name)).toBe(await store.lastPosition())
+  })
+})
+
+describe('Village eligibility projection', () => {
+  it('retains only Village stream owners and ignores duplicate foundations and unexpected streams', async () => {
+    const founded = {
+      type: 'VillageFounded',
+      data: { name: 'Private name', playerId: 'bob', at: T0 },
+    }
+    await store.append(villageChannel('alice'), 0, [founded, founded])
+    for (const stream of ['dungeon-bob', 'other-village-bob', 'village-']) {
+      await store.append(stream, 0, [founded])
+    }
+    await runner.catchUp(progressProjection)
+    expect(await db.select().from(villages)).toEqual([{ playerId: 'alice' }])
+    expect(await rows()).toEqual([])
+    await runner.rebuild(progressProjection)
+    expect(await db.select().from(villages)).toEqual([{ playerId: 'alice' }])
+  })
+
+  it('reconstructs Village existence when upgrading a version-three checkpoint', async () => {
+    await store.append(villageChannel('alice'), 0, [
+      { type: 'VillageFounded', data: { name: 'Private name', at: T0 } },
+      upgraded(),
+    ])
+    await runner.catchUp({ ...progressProjection, version: 3, eventTypes: ['BuildingUpgraded'] })
+    expect(await db.select().from(villages)).toEqual([])
+    await runner.catchUp(progressProjection)
+    expect(await db.select().from(villages)).toEqual([{ playerId: 'alice' }])
+    expect(await rows()).toEqual([progress('alice')])
+    expect(await db.select().from(projections)).toMatchObject([
+      { version: 4, position: await store.lastPosition() },
+    ])
+  })
+
+  it('rolls back Village reconstruction together with progress and the checkpoint on failure', async () => {
+    await store.append(villageChannel('alice'), 0, [
+      { type: 'VillageFounded', data: { name: 'Private name', at: T0 } },
+      upgraded(),
+    ])
+    await runner.catchUp(progressProjection)
+    const checkpoint = await db.select().from(projections)
+    const broken = {
+      ...progressProjection,
+      async apply(
+        event: Parameters<Projection['apply']>[0],
+        tx: Parameters<Projection['apply']>[1],
+      ) {
+        await progressProjection.apply(event, tx)
+        if (event.type === 'BuildingUpgraded') throw new Error('reconstruction failure')
+      },
+    }
+    await expect(runner.rebuild(broken)).rejects.toThrow('reconstruction failure')
+    expect(await db.select().from(villages)).toEqual([{ playerId: 'alice' }])
+    expect(await rows()).toEqual([progress('alice')])
+    expect(await db.select().from(projections)).toEqual(checkpoint)
   })
 })
 
@@ -572,7 +628,7 @@ describe('Merchant progress projection', () => {
     ])
     expect(await trades()).toEqual([{ offerId: 'o2', sellerId: 'alice', buyerId: null }])
     expect(await db.select().from(projections)).toMatchObject([
-      { version: 3, position: await store.lastPosition() },
+      { version: 4, position: await store.lastPosition() },
     ])
   })
 
@@ -814,7 +870,7 @@ describe('Adventurer progress projection', () => {
     expect(await rows()).toEqual([adventurer('alice'), progress('alice')])
     expect(await participants()).toEqual([{ gameId: 'g2', playerId: 'bob' }])
     expect(await db.select().from(projections)).toMatchObject([
-      { version: 3, position: await store.lastPosition() },
+      { version: 4, position: await store.lastPosition() },
     ])
   })
 

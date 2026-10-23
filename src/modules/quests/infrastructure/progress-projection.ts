@@ -6,7 +6,7 @@ import type { StoredEvent } from '@/platform/event-store/event-store'
 import type { DbTransaction, Projection } from '@/platform/projection/projection'
 import { QUESTS, type QuestId } from '../domain/catalog'
 import { type QuestDay, questDayAt } from '../domain/quest-day'
-import { dailyProgress, gamePlayers, tradeParticipants } from './schema'
+import { dailyProgress, gamePlayers, tradeParticipants, villages } from './schema'
 
 const MARKET_EVENT_TYPES = [
   'OfferPublished',
@@ -118,8 +118,9 @@ async function applyMarketEvent(event: StoredEvent, offerId: string, tx: DbTrans
 /** The runner commits progress, participant context and the checkpoint in one transaction. */
 export const progressProjection: Projection = {
   name: 'quests-progress',
-  version: 3,
+  version: 4,
   eventTypes: [
+    'VillageFounded',
     'BuildingUpgraded',
     'GameCreated',
     'PlayerJoined',
@@ -128,11 +129,15 @@ export const progressProjection: Projection = {
   ],
 
   async apply(event, tx) {
-    if (event.type === 'BuildingUpgraded') {
+    if (event.type === 'BuildingUpgraded' || event.type === 'VillageFounded') {
       if (!event.stream.startsWith(VILLAGE_CHANNEL_PREFIX)) return
       const playerId = event.stream.slice(VILLAGE_CHANNEL_PREFIX.length)
       if (!playerId) return
-      await recordProgress(tx, [playerId], gameplayDay(event), 'builder')
+      if (event.type === 'VillageFounded') {
+        await tx.insert(villages).values({ playerId }).onConflictDoNothing()
+      } else {
+        await recordProgress(tx, [playerId], gameplayDay(event), 'builder')
+      }
       return
     }
 
@@ -193,6 +198,7 @@ export const progressProjection: Projection = {
   },
 
   async reset(tx) {
+    await tx.delete(villages)
     await tx.delete(tradeParticipants)
     await tx.delete(gamePlayers)
     await tx.delete(dailyProgress)
