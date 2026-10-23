@@ -14,6 +14,7 @@ export interface QuestsModuleDeps {
   projections: ProjectionRunner
   store: EventStore
   clock?: () => number
+  dispatch: () => Promise<unknown>
 }
 
 /** Public server entry point; assembles reads, claims, confirmations and personal-data export. */
@@ -22,6 +23,7 @@ export function createQuestsModule({
   projections,
   store,
   clock = () => Date.now(),
+  dispatch,
 }: QuestsModuleDeps) {
   const reader = createDrizzleDailyQuestsReader(db, projections, store, clock)
   const claims = createClaimService(
@@ -32,7 +34,7 @@ export function createQuestsModule({
   return {
     claims,
     handlers: createQuestsHandlers(claims),
-    api: createQuestsApi(reader),
+    api: createQuestsApi(reader, claims, dispatch),
     personalData: createQuestsPersonalData(db, projections, store),
   }
 }

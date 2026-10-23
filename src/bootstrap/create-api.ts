@@ -77,7 +77,13 @@ export function createApi({
   const realm = remoteRealm ?? createRealmModule({ store, clock })
   const dungeon = createDungeonModule({ store, db, projections, clock })
   const ranking = createRankingModule({ db, projections })
-  const quests = createQuestsModule({ db, projections, store, clock })
+  const quests = createQuestsModule({
+    db,
+    projections,
+    store,
+    clock,
+    dispatch: () => dispatcher.dispatch(),
+  })
   // Le Marché déclenche la distribution après ses commandes et ses consultations.
   const market = createMarketModule({
     store,

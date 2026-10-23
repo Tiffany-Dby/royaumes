@@ -10,7 +10,7 @@ import {
 } from '../contracts'
 import type { QuestId } from '../domain/catalog'
 import { type ClaimError, decideClaim } from '../domain/claim'
-import { questDayAt } from '../domain/quest-day'
+import { type QuestDay, questDayAt } from '../domain/quest-day'
 import type { ClaimRepository, PersistedClaim } from './claim-repository'
 
 export interface ClaimEligibilityReader {
@@ -28,9 +28,9 @@ export function createClaimService(
   eligibility: ClaimEligibilityReader,
   clock = () => Date.now(),
 ) {
-  function claim(playerId: string, questId: QuestId): Promise<ClaimResult> {
-    // Retries must concern the original day, even if the clock crosses midnight.
-    const key = { playerId, questId, day: questDayAt(clock()) }
+  function claim(playerId: string, questId: QuestId, expectedDay?: QuestDay): Promise<ClaimResult> {
+    // The displayed day is a precondition; retries keep it and eligibility uses the final server time.
+    const key = { playerId, questId, day: expectedDay ?? questDayAt(clock()) }
     const stream = claimStream(key)
     return withOptimisticRetry(async () => {
       const { state, version } = await repo.load(stream)

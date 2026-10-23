@@ -292,6 +292,7 @@ describe('Quests personal data integration', () => {
       store,
       projections: runner,
       clock: () => Date.UTC(2026, 0, 1, 1),
+      dispatch: async () => {},
     })
     const result = await module.claims.claim('alice', 'builder')
     if (!result.ok) throw new Error(result.error.code)
