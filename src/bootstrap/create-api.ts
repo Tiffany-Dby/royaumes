@@ -123,6 +123,7 @@ export function createApi({
     ranking.channelPolicy,
     market.channelPolicy,
     tavern.channelPolicy,
+    quests.channelPolicy,
   ]
 
   // 2. Application principale : toutes ses routes sont préfixées par /api.

@@ -2,13 +2,20 @@
 import { hc } from 'hono/client'
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useChannel } from '@/platform/realtime/use-channel'
 import { Entity } from '@/ui/entity'
 import { look } from '@/ui/theme'
 import type { QuestsApi } from './api'
-import type { DailyQuest, DailyQuests, RewardStatus } from './contracts'
+import { type DailyQuest, type DailyQuests, QUESTS_CHANNEL, type RewardStatus } from './contracts'
 import { questDayAt, questInstanceId } from './domain/quest-day'
 
 const client = hc<QuestsApi>('/api/quests')
+
+const CONNECTION_LABELS = {
+  connecting: 'Connexion au temps réel…',
+  open: 'Temps réel connecté',
+  reconnecting: 'Reconnexion au temps réel…',
+} as const
 
 const STATUS_LABELS: Record<RewardStatus, string> = {
   in_progress: 'En cours',
@@ -98,35 +105,52 @@ export function QuestsScreen() {
     error: boolean
   } | null>(null)
   const working = useRef(false)
+  const refreshRequested = useRef(false)
   const refreshAt = useRef(0)
 
   const load = useCallback(async () => {
-    // A response crossing local UTC midnight must trigger another read before enabling claims.
-    const now = new Date()
-    const boundary = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
-    try {
-      const response = await client.index.$get()
-      if (!response.ok) {
-        setLoadError(await errorText(response))
-        return
+    do {
+      refreshRequested.current = false
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          // A response crossing local UTC midnight must trigger another read before enabling claims.
+          const now = new Date()
+          const boundary = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
+          const response = await client.index.$get()
+          // A journal gap can briefly prevent projection catch-up; only retry this response.
+          if (response.status === 503 && attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1_000))
+            continue
+          }
+          if (!response.ok) {
+            setLoadError(await errorText(response))
+          } else {
+            const body = await response.json()
+            refreshAt.current = boundary
+            setData({
+              ...body,
+              day: questDayAt(Date.parse(`${body.day}T00:00:00.000Z`)),
+            })
+            setLoadError(null)
+          }
+        } catch {
+          setLoadError(
+            'Impossible de charger les quêtes. Cliquez sur « Actualiser » pour réessayer.',
+          )
+        }
+        break
       }
-      const body = await response.json()
-      refreshAt.current = boundary
-      setData({
-        ...body,
-        day: questDayAt(Date.parse(`${body.day}T00:00:00.000Z`)),
-      })
-      setLoadError(null)
-    } catch {
-      setLoadError('Impossible de charger les quêtes. Cliquez sur « Actualiser » pour réessayer.')
-    }
+      // Notifications received during a read require another authoritative snapshot.
+    } while (refreshRequested.current)
   }, [])
 
   const refresh = useCallback(async () => {
-    if (working.current) return
+    if (working.current) {
+      refreshRequested.current = true
+      return
+    }
     working.current = true
     setBusy(true)
-    setMessage(null)
     try {
       await load()
     } finally {
@@ -134,6 +158,15 @@ export function QuestsScreen() {
       setBusy(false)
     }
   }, [load])
+
+  const status = useChannel(QUESTS_CHANNEL, () => {
+    void refresh()
+  })
+
+  useEffect(() => {
+    // Re-read after opening as well as reconnecting to close the initial subscription gap.
+    if (status === 'open') void refresh()
+  }, [status, refresh])
 
   useEffect(() => {
     void refresh()
@@ -196,10 +229,14 @@ export function QuestsScreen() {
         <h1 id="quests-title">
           <Entity kind="quests" showLabel />
         </h1>
+        <span className="status" data-status={status} role="status">
+          {CONNECTION_LABELS[status]}
+        </span>
         <button
           type="button"
           disabled={busy}
           onClick={() => {
+            setMessage(null)
             void refresh()
           }}
         >

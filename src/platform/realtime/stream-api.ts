@@ -51,9 +51,14 @@ interface IdentifiedSource extends ChannelSource {
  * sont identifiés par leur position, et seuls les événements à venir sont transmis. Un canal
  * doté d'une source propre lit cette source, et identifie ses éléments par leur position.
  */
-function sourceOf(store: EventStore, channel: string, policy: ChannelPolicy): IdentifiedSource {
+function sourceOf(
+  store: EventStore,
+  channel: string,
+  policy: ChannelPolicy,
+  userId: string,
+): IdentifiedSource {
   if (policy.source) {
-    const source = policy.source
+    const source = typeof policy.source === 'function' ? policy.source(userId) : policy.source
     return {
       read: source.read,
       start: source.start,
@@ -81,9 +86,8 @@ async function startFrom(given: string | undefined, source: IdentifiedSource) {
 }
 
 /**
- * Sous-application du temps réel, montée sur /api/stream.
- * Le flux ne conserve aucun état en mémoire : il relit le journal, et n'importe quelle
- * instance de l'application peut donc servir n'importe quel joueur.
+ * Realtime routes mounted at /api/stream. Sources may retain a connection-local cursor;
+ * durable history and Last-Event-ID allow another instance to serve a reconnecting client.
  */
 export function createRealtimeApi({
   store,
@@ -100,7 +104,7 @@ export function createRealtimeApi({
         const channel = c.req.param('channel')
         const policy = await authorize(policies, channel, c.var.userId)
         if (!policy) return c.json(FORBIDDEN, 403)
-        const source = sourceOf(store, channel, policy)
+        const source = sourceOf(store, channel, policy, c.var.userId)
 
         // Point de reprise : l'en-tête Last-Event-ID, envoyé par le navigateur à la reconnexion,
         // ou à défaut le paramètre after ; sinon, l'identifiant de départ du canal.
@@ -153,7 +157,8 @@ export function createRealtimeApi({
         const channel = c.req.param('channel')
         const policy = await authorize(policies, channel, c.var.userId)
         if (!policy) return c.json(FORBIDDEN, 403)
-        const source = sourceOf(store, channel, policy)
+        c.header('Cache-Control', 'private, no-store')
+        const source = sourceOf(store, channel, policy, c.var.userId)
         const events = await source.read(await startFrom(c.req.query('after'), source))
         return c.json({
           events: events.map((event) => present(event, policy)),

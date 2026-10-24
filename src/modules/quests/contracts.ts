@@ -4,6 +4,7 @@ import { type QuestDay, questInstanceId } from './domain/quest-day'
 export const CLAIM_STREAM_PREFIX = 'quests-claim-'
 export const CLAIM_TRANSFER_PREFIX = 'quests:reward:'
 export const QUESTS_TOPICS = { transferResult: 'quests.transfer-result' } as const
+export const QUESTS_CHANNEL = 'quests'
 
 export interface ClaimKey {
   playerId: string

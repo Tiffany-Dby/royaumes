@@ -6,6 +6,7 @@ import { createClaimService } from './application/claim-service'
 import { createDrizzleClaimEligibilityReader } from './infrastructure/drizzle-claim-eligibility-reader'
 import { createDrizzleDailyQuestsReader } from './infrastructure/drizzle-daily-quests-reader'
 import { createEventStoreClaimRepository } from './infrastructure/event-store-claim-repository'
+import { createQuestsChannel } from './infrastructure/quests-channel'
 import { createQuestsHandlers } from './messages'
 import { createQuestsPersonalData } from './personal-data'
 
@@ -17,7 +18,7 @@ export interface QuestsModuleDeps {
   dispatch: () => Promise<unknown>
 }
 
-/** Public server entry point; assembles reads, claims, confirmations and personal-data export. */
+/** Public server entry point for Quests, including its private realtime channel. */
 export function createQuestsModule({
   db,
   projections,
@@ -35,6 +36,7 @@ export function createQuestsModule({
     claims,
     handlers: createQuestsHandlers(claims),
     api: createQuestsApi(reader, claims, dispatch),
+    channelPolicy: createQuestsChannel(store),
     personalData: createQuestsPersonalData(db, projections, store),
   }
 }

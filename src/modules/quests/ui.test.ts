@@ -58,6 +58,8 @@ describe('Daily Quests rendered markup', () => {
     expect(html).toContain('Quêtes quotidiennes')
     expect(html).toContain('role="status"')
     expect(html).toContain('Chargement des quêtes…')
+    expect(html).toContain('data-status="connecting"')
+    expect(html).toContain('Connexion au temps réel…')
   })
 
   it.each([

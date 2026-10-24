@@ -1,9 +1,8 @@
 import type { StoredEvent } from '../event-store/event-store'
 
 /**
- * Source d'un canal qui ne lit pas le journal, fournie par le module qui le déclare.
- * Ses éléments sont présentés sous la forme d'événements, identifiés par leur position,
- * afin que l'interface les reçoive comme ceux des autres canaux.
+ * A module-owned channel source, presented as events identified by their position.
+ * It may read the journal or another durable source.
  */
 export interface ChannelSource {
   /** Éléments postérieurs à une position, dans l'ordre croissant des positions. */
@@ -23,8 +22,8 @@ export interface ChannelPolicy {
   /** Indique si un joueur a le droit d'écouter un canal portant ce préfixe. */
   canSubscribe(channel: string, userId: string): boolean | Promise<boolean>
   /**
-   * Canal discret : le flux ne transmet que le type et la version de chaque événement,
-   * jamais ses données. Chaque abonné relit alors sa propre vue auprès de l'API.
+   * Removes event data and recording time, retaining position, stream, version and type.
+   * A private source must also filter recipients and sanitize identifying metadata.
    */
   redact?: boolean
   /**
@@ -34,10 +33,10 @@ export interface ChannelPolicy {
    */
   global?: { types: string[] }
   /**
-   * Canal alimenté par une source propre au module, et non par le journal : par exemple
-   * une table, pour un module qui n'enregistre pas d'événements.
+   * A shared source or a factory bound to the authenticated user after authorization.
+   * Factories create an isolated source for each SSE connection or fallback request.
    */
-  source?: ChannelSource
+  source?: ChannelSource | ((userId: string) => ChannelSource)
 }
 
 /**
