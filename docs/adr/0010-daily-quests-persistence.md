@@ -1,6 +1,6 @@
 # ADR-0010 - Event Sourcing and CQRS for Daily Quests
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-21
 
 ## Context
@@ -9,79 +9,75 @@ Daily Quests derives progress from Village, Dungeon and Market activity.
 Progress resets at 00:00 UTC, while accepted reward claims must remain durable
 and must never credit the same reward twice.
 
-The platform already provides an Event Store with optimistic concurrency,
-versioned projections and a transactional outbox. Published gameplay events
-sometimes require earlier events to identify their participants.
+The platform provides optimistic concurrency, versioned projections and a
+transactional outbox. Replaying gameplay must not grant rewards again.
 
 ## Decision
 
-The module combines Event Sourcing for reward claims and settlement with a
-CQRS read model in the `quests` schema, reusing existing platform mechanisms.
+Use Event Sourcing for reward claims and settlement, and a versioned CQRS read
+model for gameplay progress. Cross-module communication is specified in
+[ADR-0011](0011-daily-quests-communication.md).
 
-- **Time and identity:** Gameplay eligibility uses the source event's `data.at`,
-  not its database recording time (`occurredAt`). A daily quest instance is
-  identified by its UTC date and quest identifier. Player identity comes from
-  authentication. Selecting the current day resets the visible progress without
-  a scheduled task; historical events retain their original day during replay.
+- **Time and identity:** A quest instance combines its UTC date and quest ID;
+  player identity comes from authentication. Gameplay uses `data.at`, not
+  `occurredAt`. Selecting the current UTC day resets visible progress without a
+  scheduled task; replay retains historical days.
 
-- **Progress and participants:** The projection consumes `BuildingUpgraded`,
-  `GameEnded` and `TradeCompleted`, together with the earlier published events
-  needed to identify participants. Dungeon participation excludes companions;
-  Market progress credits the seller and successful buyer. Supporting context
-  survives day boundaries. `TradeCompleted` has its existing Market meaning:
-  payment succeeded and deliveries were requested, not necessarily completed.
+- **Owned read model:** The `quests` schema stores capped daily progress,
+  temporary participation, and Village existence derived from `VillageFounded`.
+  Participation survives midnight and is removed at activity termination. Village
+  history currently survives identity deletion. Domain decisions remain pure;
+  adapters retain database operations.
 
-- **Village eligibility:** Village existence is derived from `VillageFounded`
-  in the Quests projection. This relies on the current lifecycle, which retains
-  Village history after account deletion. Quests reads no other module's tables
-  or internal services.
+- **Authoritative claim history:** `QuestRewardClaimAccepted` and
+  `QuestRewardDelivered` are stored in the platform journal. Reward status is
+  computed from these events and projected eligibility, not stored in another
+  projection. Accepted history overrides eligibility; pending means no recorded
+  delivery confirmation.
 
 - **Projection consistency:** Progress, supporting context and the checkpoint
-  advance atomically through the versioned projection runner. Before a new claim,
-  Quests requires catch-up through a captured journal position; otherwise, the
-  request receives a retryable result. This preserves the platform's eventual
-  consistency and position-gap limitations rather than providing a strict
-  cross-module snapshot.
+  advance atomically through the versioned projection runner. Daily reads and
+  new claim acceptance require catch-up through a captured journal position;
+  an incomplete catch-up returns `503 QUESTS_NOT_READY`. The platform's gap-grace
+  heuristic is not a strict cross-module snapshot: a commit arriving behind an
+  advanced checkpoint may require reconstruction. Replay changes derived data,
+  never claim history or deposit messages.
 
 - **Durable claims:** Each player, UTC day and quest has one claim stream,
-  protected by optimistic concurrency. Completion, Village existence and
-  expiration are checked before acceptance, including on retries. A claim must
-  still be eligible at the moment of the final claim decision, according to the
-  server clock, even if the HTTP request started before midnight. The accepted
-  event records the reward and a deterministic, namespaced transfer identifier;
-  authoritative claim history prevents duplicate acceptance independently of
-  the read model.
+  protected by optimistic concurrency and authoritative history. The displayed
+  day prevents a stale view from claiming a new day's quest. Completion, Village
+  existence and expiration are checked at the final server-clock decision,
+  including retries, even if the request began before midnight. Acceptance
+  snapshots the reward resource/amount and a deterministic, namespaced transfer
+  ID, committing atomically with its deposit request. Accepted rewards remain
+  owed after midnight; delivery confirmation is a separate durable event.
 
-- **Delivery and settlement:** The accepted claim and its `REALM_TOPICS.deposit`
-  request are persisted atomically. Village deduplicates by transfer identifier
-  and confirms through the existing `replyTo` contract. Quests records confirmation
-  idempotently and distinguishes pending from delivered rewards. Accepted claims
-  remain deliverable after midnight. Projection replay never sends deposits.
+- **Recovery:** Quest reads, accepted or duplicate claim requests, and the shared
+  daily task trigger dispatch. Bounded retries process eligible messages on later
+  dispatch calls, not through a continuous worker. Exhausted messages remain for
+  operator requeue after fixing the cause; requeue itself does not dispatch.
+  Failure neither erases acceptance nor proves that no deposit occurred.
 
-- **Recovery:** Quests attempts outbox dispatch after claims and during reads,
-  reusing the daily task and dead-letter tooling. Delivery failures leave claims
-  durable and pending; exhausted retries require operator intervention.
-
-- **Privacy:** A personal-data contributor exports progress and claim history.
-  Quests stores player references without copying names. Account deletion follows
-  ADR-0008: replay-essential references remain pseudonymous after identity removal.
-  Erasure and reconstruction must produce equivalent data, while preserving
-  transfer deduplication and settlement of accepted claims.
+- **Privacy:** The contributor exports the player's progress, participation,
+  eligibility and claim history, omitting names and counterparty identifiers.
+  Under [ADR-0008](0008-donnees-personnelles.md), name-free replay data and accepted
+  obligations survive identity deletion, without a Quests erasure hook or
+  scheduled expiry. This is pseudonymous retention, not physical deletion or
+  complete anonymization.
 
 ## Consequences
 
 ### Positive
 
-- Progress and reward status can be reconstructed without granting rewards again.
-- Concurrent requests and repeated deliveries cannot duplicate a reward.
-- Integration reuses published events, Village contracts and platform mechanisms.
+- Derived data can be rebuilt without granting rewards again.
+- Durable claims and stable transfer IDs support idempotent acceptance/delivery.
+- Storage and recovery reuse existing platform mechanisms.
 - Daily resets require no background task.
 
 ### Negative
 
-- Participant context and separate read and write models increase complexity.
-- Projection lag can temporarily delay an otherwise eligible claim, including
-  near midnight.
+- Participant context and separate read/write models increase complexity.
+- Projection lag can block an eligible claim, including near midnight.
 - Delivery has no guaranteed completion deadline; dead letters require attention.
 - Pseudonymous history remains after deletion; it is not fully anonymous.
 
@@ -92,8 +88,6 @@ CQRS read model in the `quests` schema, reusing existing platform mechanisms.
   events reuse the existing Event Store and support settlement reconstruction.
 - **Event Sourcing for all progress:** Adds derived progress events when source
   gameplay events already provide the necessary history.
-- **Direct Village writes or calls for delivery:** Break module ownership or risk
-  losing delivery between claim persistence and the resource operation.
 - **Scheduled reset:** Adds scheduling and recovery concerns without improving
   UTC date-based eligibility.
 
@@ -106,6 +100,13 @@ or pseudonymous retention no longer meets the project's privacy requirements.
 ## Generative AI Usage
 
 - **Tools:** ChatGPT and Codex (OpenAI).
-- **Contribution:** Initial proposal, repository review and ADR refinement.
-- **Verification:** Decisions checked against existing contracts and platform
-  behavior; implementation guarantees remain to be validated through tests.
+- **Contribution:** ChatGPT supported architectural discussion; Codex assisted
+  implementation, tests and ADR revision. The project author reviewed decisions
+  incrementally.
+- **Verification:** Source review and local Vitest coverage of
+  [domain decisions](../../src/modules/quests/domain/claim.test.ts),
+  [projection replay and rollback](../../src/modules/quests/infrastructure/progress-projection.test.ts),
+  [claim atomicity, concurrency and midnight handling](../../src/modules/quests/infrastructure/claim-persistence.test.ts),
+  and [export, deletion and reconstruction](../../src/bootstrap/quests-privacy.test.ts).
+  Browser behavior, production deployment/migrations and production delivery
+  availability remain unverified.

@@ -16,3 +16,4 @@ un nouvel ADR est rédigé et l'ancien prend le statut « remplacé ».
 | [0008](0008-donnees-personnelles.md) | Stockage classique pour la Taverne, et réécriture ciblée du journal pour l'effacement | Accepté |
 | [0009](0009-extraction-village.md) | Extraction du Village en service autonome, préparée mais non déployée | Accepté |
 | [0010](0010-daily-quests-persistence.md) | Event Sourcing and CQRS for Daily Quests | Accepté |
+| [0011](0011-daily-quests-communication.md) | Published Events, Transactional Messaging and Private Realtime for Daily Quests | Accepté |
