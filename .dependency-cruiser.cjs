@@ -23,6 +23,13 @@ module.exports = {
       },
     },
     {
+      name: 'quests-gameplay-contracts-only',
+      comment: 'Quests uses published gameplay contracts, never module factories or UI components.',
+      severity: 'error',
+      from: { path: '^src/modules/quests/' },
+      to: { path: '^src/modules/(realm|dungeon|market)/(index\\.ts|ui\\.tsx)$' },
+    },
+    {
       // Règle 1, vue depuis le reste du projet (pages, racine de composition, plateforme).
       name: 'outside-uses-public-entries',
       comment: "Hors des modules, on n'importe que les entrées publiques d'un module.",
