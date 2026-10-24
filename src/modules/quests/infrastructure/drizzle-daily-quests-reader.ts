@@ -5,6 +5,8 @@ import type { ProjectionRunner } from '@/platform/projection/projection'
 import type { DailyQuestsReader } from '../application/daily-quests-reader'
 import { claimStream, type RewardStatus } from '../contracts'
 import { QUESTS } from '../domain/catalog'
+import { rewardStatusFor } from '../domain/claim'
+import { questProgress } from '../domain/progress'
 import { questDayAt } from '../domain/quest-day'
 import { createEventStoreClaimRepository } from './event-store-claim-repository'
 import { progressProjection } from './progress-projection'
@@ -38,18 +40,17 @@ export function createDrizzleDailyQuestsReader(
         .where(eq(villages.playerId, playerId))
       const quests = await Promise.all(
         QUESTS.map(async (quest) => {
-          const progress = rows.find((row) => row.questId === quest.id)?.count ?? 0
-          const completed = progress >= quest.requiredCount
+          const { progress, completed } = questProgress(
+            quest,
+            rows.find((row) => row.questId === quest.id)?.count ?? 0,
+          )
           const { state } = await claims.load(claimStream({ playerId, day, questId: quest.id }))
-          let rewardStatus: RewardStatus
-          // Accepted claims remain authoritative even if projected eligibility differs.
-          if (state.accepted) {
-            rewardStatus = state.deliveredAt === null ? 'pending' : 'delivered'
-          } else if (!completed) {
-            rewardStatus = 'in_progress'
-          } else {
-            rewardStatus = village ? 'available' : 'village_required'
-          }
+          const rewardStatus: RewardStatus = rewardStatusFor({
+            completed,
+            villageExists: Boolean(village),
+            accepted: Boolean(state.accepted),
+            deliveredAt: state.deliveredAt,
+          })
           return { ...quest, progress, completed, rewardStatus }
         }),
       )

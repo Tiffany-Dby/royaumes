@@ -49,3 +49,19 @@ export function decideClaim(input: ClaimInput, now: number): ClaimDecision {
   }
   return { ok: false, error: { code: 'QUEST_INCOMPLETE' } }
 }
+
+/** Accepted claim history takes precedence over current progress and Village eligibility. */
+export function rewardStatusFor(facts: {
+  completed: boolean
+  villageExists: boolean
+  accepted: boolean
+  deliveredAt: number | null
+}) {
+  if (facts.accepted) {
+    if (facts.deliveredAt !== null) return 'delivered' as const
+    return 'pending' as const
+  }
+  if (!facts.completed) return 'in_progress' as const
+  if (!facts.villageExists) return 'village_required' as const
+  return 'available' as const
+}

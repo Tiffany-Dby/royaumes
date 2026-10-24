@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { QUESTS } from './catalog'
-import { type ClaimInput, decideClaim } from './claim'
+import { type ClaimInput, decideClaim, rewardStatusFor } from './claim'
 import { questDayAt } from './quest-day'
 
 const NOW = Date.UTC(2026, 9, 23, 12)
@@ -94,4 +94,49 @@ describe('Daily quest claim decisions', () => {
     expect(decideClaim(frozen, NOW)).toEqual(decideClaim(frozen, NOW))
     expect(frozen).toEqual(input)
   })
+})
+
+describe('Quest reward status decisions', () => {
+  it.each([
+    {
+      completed: false,
+      villageExists: true,
+      accepted: false,
+      deliveredAt: null,
+      expected: 'in_progress',
+    },
+    {
+      completed: true,
+      villageExists: true,
+      accepted: false,
+      deliveredAt: null,
+      expected: 'available',
+    },
+    {
+      completed: true,
+      villageExists: false,
+      accepted: false,
+      deliveredAt: null,
+      expected: 'village_required',
+    },
+    {
+      completed: false,
+      villageExists: false,
+      accepted: true,
+      deliveredAt: null,
+      expected: 'pending',
+    },
+    {
+      completed: false,
+      villageExists: false,
+      accepted: true,
+      deliveredAt: 0,
+      expected: 'delivered',
+    },
+  ])(
+    'reports $expected from authoritative claim and eligibility facts',
+    ({ expected, ...facts }) => {
+      expect(rewardStatusFor(facts)).toBe(expected)
+    },
+  )
 })
