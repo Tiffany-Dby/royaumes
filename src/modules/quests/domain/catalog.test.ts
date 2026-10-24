@@ -6,22 +6,22 @@ describe('Daily quest catalog', () => {
     expect(QUESTS).toEqual([
       {
         id: 'builder',
-        name: 'The Builder',
-        objective: 'Upgrade 2 Village buildings.',
+        name: 'Le Bâtisseur',
+        objective: 'Améliorer 2 bâtiments du Village.',
         requiredCount: 2,
         reward: { resource: 'wood', amount: 50 },
       },
       {
         id: 'adventurer',
-        name: 'The Adventurer',
-        objective: 'Complete 1 Dungeon expedition, won or lost.',
+        name: 'L’Aventurier',
+        objective: 'Terminer une expédition dans le Donjon, gagnée ou perdue.',
         requiredCount: 1,
         reward: { resource: 'stone', amount: 75 },
       },
       {
         id: 'merchant',
-        name: 'The Merchant',
-        objective: 'Complete 1 successful Market trade as seller or buyer.',
+        name: 'Le Marchand',
+        objective: 'Conclure un échange sur le Marché, comme vendeur ou acheteur.',
         requiredCount: 1,
         reward: { resource: 'gold', amount: 100 },
       },

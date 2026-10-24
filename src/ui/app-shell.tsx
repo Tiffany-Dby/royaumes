@@ -9,6 +9,7 @@ import { Entity } from './entity'
 export const NAV = [
   { href: '/village', kind: 'village', label: 'Village' },
   { href: '/dungeon', kind: 'dungeon', label: 'Donjon' },
+  { href: '/quests', kind: 'quests', label: 'Quêtes' },
   { href: '/ranking', kind: 'ranking', label: 'Classement' },
   { href: '/market', kind: 'market', label: 'Marché' },
   { href: '/tavern', kind: 'tavern', label: 'Taverne' },
