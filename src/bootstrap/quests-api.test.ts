@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createQuestsModule } from '@/modules/quests'
 import { createQuestsApi } from '@/modules/quests/api'
 import type { ClaimResult } from '@/modules/quests/application/claim-service'
-import { claimStream, type DailyQuests } from '@/modules/quests/contracts'
+import { claimStream, claimTransferId, type DailyQuests } from '@/modules/quests/contracts'
 import { QUESTS } from '@/modules/quests/domain/catalog'
 import { questDayAt } from '@/modules/quests/domain/quest-day'
 import { dailyProgress } from '@/modules/quests/infrastructure/schema'
@@ -80,6 +80,7 @@ describe('Daily Quest claim API', () => {
     const api = await createTestApi()
     await completeBuilder(api)
     await foundVillage(api, 'bob')
+    expect((await dailyQuests(api)).quests[0].rewardStatus).toBe('available')
     const forged = await api.post(
       '/api/quests/builder/claim',
       { day: '2026-01-01', playerId: 'alice' },
@@ -101,6 +102,7 @@ describe('Daily Quest claim API', () => {
     const duplicate = await api.post('/api/quests/builder/claim', { day: '2026-01-01' })
     expect(duplicate.status).toBe(409)
     expect(await duplicate.json()).toEqual({ error: { code: 'ALREADY_CLAIMED' } })
+    expect((await dailyQuests(api)).quests[0].rewardStatus).toBe('delivered')
     const store = createEventStore(api.db)
     const key = {
       playerId: 'alice',
@@ -199,9 +201,11 @@ describe('Daily Quest claim API', () => {
     expect(response.status).toBe(202)
     expect((await response.json()).accepted).toBe(true)
     expect(await dbPending(api)).toHaveLength(1)
+    expect((await dailyQuests(api)).quests[0].rewardStatus).toBe('pending')
+    expect((await dailyQuests(api, 'bob')).quests[0].rewardStatus).toBe('in_progress')
     api.setServiceUp(true)
     api.advance(1)
-    expect((await api.get('/api/quests')).status).toBe(200)
+    expect((await dailyQuests(api)).quests[0].rewardStatus).toBe('delivered')
     expect(await dbPending(api)).toEqual([])
     const history = await createEventStore(api.db).read(
       claimStream({ playerId: 'alice', questId: 'builder', day: questDayAt(Date.UTC(2026, 0, 1)) }),
@@ -218,6 +222,64 @@ async function dbPending(api: TestApi) {
 }
 
 describe('Daily Quests API', () => {
+  it('requires a Village before a completed quest becomes available', async () => {
+    const api = await createTestApi()
+    const created = await api.post('/api/dungeon/games', {})
+    expect(created.status).toBe(201)
+    const { gameId } = await created.json()
+    expect((await api.post(`/api/dungeon/games/${gameId}/start`, {})).status).toBe(200)
+    api.advance(60)
+    expect((await api.post(`/api/dungeon/games/${gameId}/deadline`, {})).status).toBe(200)
+    expect((await dailyQuests(api)).quests[1]).toMatchObject({
+      id: 'adventurer',
+      progress: 1,
+      completed: true,
+      rewardStatus: 'village_required',
+    })
+    await foundVillage(api)
+    expect((await dailyQuests(api)).quests[1]).toMatchObject({
+      id: 'adventurer',
+      progress: 1,
+      completed: true,
+      rewardStatus: 'available',
+    })
+  })
+
+  it.each(['pending', 'delivered'] as const)(
+    'keeps %s history authoritative over eligibility and isolated by player and day',
+    async (status) => {
+      const api = await createTestApi()
+      const at = Date.UTC(2026, 0, 1)
+      const key = { playerId: 'alice', questId: 'builder' as const, day: questDayAt(at) }
+      const transferId = claimTransferId(key)
+      // History without projected eligibility demonstrates that acceptance remains authoritative.
+      await createEventStore(api.db).append(claimStream(key), 0, [
+        {
+          type: 'QuestRewardClaimAccepted',
+          data: { ...key, reward: { resource: 'wood', amount: 50 }, acceptedAt: at, transferId },
+        },
+        ...(status === 'delivered'
+          ? [{ type: 'QuestRewardDelivered', data: { transferId, at } }]
+          : []),
+      ])
+      expect((await dailyQuests(api)).quests[0]).toMatchObject({
+        id: 'builder',
+        progress: 0,
+        completed: false,
+        rewardStatus: status,
+      })
+      expect(
+        (await dailyQuests(api, 'bob')).quests.every(
+          (quest) => quest.rewardStatus === 'in_progress',
+        ),
+      ).toBe(true)
+      api.advance(24 * 60)
+      const current = await dailyQuests(api)
+      expect(current.day).toBe('2026-01-02')
+      expect(current.quests.every((quest) => quest.rewardStatus === 'in_progress')).toBe(true)
+    },
+  )
+
   it.each(['/api/quests', '/api/quests/'])('requires authentication for %s', async (path) => {
     const api = await createTestApi()
     const response = await api.get(path, null)
@@ -232,7 +294,12 @@ describe('Daily Quests API', () => {
     expect(response.headers.get('Cache-Control')).toBe('private, no-store')
     expect(await response.json()).toEqual({
       day: '2026-01-01',
-      quests: QUESTS.map((quest) => ({ ...quest, progress: 0, completed: false })),
+      quests: QUESTS.map((quest) => ({
+        ...quest,
+        progress: 0,
+        completed: false,
+        rewardStatus: 'in_progress',
+      })),
     })
   })
 
@@ -242,7 +309,11 @@ describe('Daily Quests API', () => {
     await foundVillage(api, 'bob')
     api.advance(60)
     await upgrade(api)
-    expect((await dailyQuests(api)).quests[0]).toMatchObject({ progress: 1, completed: false })
+    expect((await dailyQuests(api)).quests[0]).toMatchObject({
+      progress: 1,
+      completed: false,
+      rewardStatus: 'in_progress',
+    })
     api.advance(60)
     await upgrade(api)
 
@@ -270,6 +341,7 @@ describe('Daily Quests API', () => {
         ...quest,
         progress: quest.requiredCount,
         completed: true,
+        rewardStatus: 'available',
       })),
     })
     expect(await dailyQuests(api)).toEqual(alice)
@@ -281,6 +353,7 @@ describe('Daily Quests API', () => {
         ...quest,
         progress: quest.id === 'merchant' ? 1 : 0,
         completed: quest.id === 'merchant',
+        rewardStatus: quest.id === 'merchant' ? 'available' : 'in_progress',
       })),
     })
     expect((await dailyQuests(api, 'carol')).quests.every((quest) => quest.progress === 0)).toBe(
@@ -300,7 +373,12 @@ describe('Daily Quests API', () => {
     api.advance(1 / 60_000)
     expect(await dailyQuests(api)).toEqual({
       day: '2026-01-02',
-      quests: QUESTS.map((quest) => ({ ...quest, progress: 0, completed: false })),
+      quests: QUESTS.map((quest) => ({
+        ...quest,
+        progress: 0,
+        completed: false,
+        rewardStatus: 'in_progress',
+      })),
     })
     await upgrade(api)
     expect((await dailyQuests(api)).quests[0].progress).toBe(1)
@@ -332,7 +410,12 @@ describe('Daily Quests API', () => {
     vi.spyOn(Date, 'now').mockReturnValue(later)
     expect(await dailyQuests(api)).toEqual({
       day: '2026-01-01',
-      quests: QUESTS.map((quest) => ({ ...quest, progress: 0, completed: false })),
+      quests: QUESTS.map((quest) => ({
+        ...quest,
+        progress: 0,
+        completed: false,
+        rewardStatus: 'in_progress',
+      })),
     })
   })
 

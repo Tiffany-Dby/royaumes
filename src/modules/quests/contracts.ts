@@ -16,9 +16,20 @@ export const claimStream = (key: ClaimKey) =>
 
 export const claimTransferId = (key: ClaimKey) => `${CLAIM_TRANSFER_PREFIX}${claimStream(key)}`
 
-export type DailyQuest = QuestDefinition & { progress: number; completed: boolean }
+export type RewardStatus =
+  | 'in_progress'
+  | 'available'
+  | 'village_required'
+  | 'pending'
+  | 'delivered'
 
-/** Current UTC objectives and progress for the authenticated player. */
+export type DailyQuest = QuestDefinition & {
+  progress: number
+  completed: boolean
+  rewardStatus: RewardStatus
+}
+
+/** Current UTC objectives, progress and reward status for the authenticated player. */
 export interface DailyQuests {
   day: QuestDay
   quests: DailyQuest[]
