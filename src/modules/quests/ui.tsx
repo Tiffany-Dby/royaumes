@@ -26,14 +26,15 @@ const STATUS_LABELS: Record<RewardStatus, string> = {
 }
 
 const ERRORS: Record<string, string> = {
-  INVALID_INPUT: 'La date des quêtes est invalide. Actualisez les quêtes et réessayez.',
-  QUEST_NOT_FOUND: 'Cette quête n’est pas disponible. Actualisez les quêtes.',
+  INVALID_INPUT:
+    'La date des quêtes est invalide. Consultez les quêtes actualisées avant de réessayer.',
+  QUEST_NOT_FOUND: 'Cette quête n’est pas disponible.',
   ALREADY_CLAIMED: 'Cette récompense a déjà été réclamée. Consultez son état actualisé.',
   NOT_CURRENT_DAY: 'Une nouvelle journée de quêtes a commencé. Consultez les quêtes actualisées.',
   VILLAGE_REQUIRED: 'Fondez un village avant de récupérer cette récompense.',
   QUEST_INCOMPLETE: 'Cette quête n’est pas encore terminée.',
   QUESTS_NOT_READY:
-    'La progression des quêtes est en cours de mise à jour. Cliquez sur « Actualiser » pour réessayer.',
+    'La progression des quêtes est en cours de mise à jour. Veuillez réessayer dans un instant.',
 }
 
 async function errorText(response: Response): Promise<string> {
@@ -44,11 +45,9 @@ async function errorText(response: Response): Promise<string> {
   if (response.status === 503) return ERRORS.QUESTS_NOT_READY
   try {
     const body = await response.json()
-    return (
-      ERRORS[body.error?.code] ?? 'La demande a échoué. Cliquez sur « Actualiser » pour réessayer.'
-    )
+    return ERRORS[body.error?.code] ?? 'La demande a échoué. Veuillez réessayer.'
   } catch {
-    return 'La demande a échoué. Cliquez sur « Actualiser » pour réessayer.'
+    return 'La demande a échoué. Veuillez réessayer.'
   }
 }
 
@@ -134,9 +133,7 @@ export function QuestsScreen() {
             setLoadError(null)
           }
         } catch {
-          setLoadError(
-            'Impossible de charger les quêtes. Cliquez sur « Actualiser » pour réessayer.',
-          )
+          setLoadError('Impossible de charger les quêtes. Veuillez réessayer.')
         }
         break
       }
@@ -232,16 +229,6 @@ export function QuestsScreen() {
         <span className="status" data-status={status} role="status">
           {CONNECTION_LABELS[status]}
         </span>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            setMessage(null)
-            void refresh()
-          }}
-        >
-          Actualiser
-        </button>
       </div>
       {data && (
         <p className="muted">
@@ -250,9 +237,22 @@ export function QuestsScreen() {
       )}
       {busy && <p role="status">{data ? 'Mise à jour des quêtes…' : 'Chargement des quêtes…'}</p>}
       {loadError && (
-        <p className="error" role="alert">
-          {loadError}
-        </p>
+        <>
+          <p className="error" role="alert">
+            {loadError}
+          </p>
+          {!busy && (
+            <button
+              type="button"
+              onClick={() => {
+                setMessage(null)
+                void refresh()
+              }}
+            >
+              Réessayer
+            </button>
+          )}
+        </>
       )}
       {message && (
         <p className={message.error ? 'error' : 'muted'} role={message.error ? 'alert' : 'status'}>
@@ -261,7 +261,8 @@ export function QuestsScreen() {
       )}
       {stale && !busy && (
         <p role="status">
-          La journée UTC a peut-être changé. Actualisez les quêtes avant de réclamer une récompense.
+          La journée UTC a peut-être changé. Les récompenses restent indisponibles tant que les
+          quêtes ne sont pas à jour.
         </p>
       )}
       <div aria-busy={busy}>

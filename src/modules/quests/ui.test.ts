@@ -1,9 +1,16 @@
-import { createElement } from 'react'
+import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DailyQuest, RewardStatus } from './contracts'
 import { QUESTS } from './domain/catalog'
 import { QuestCard, QuestsScreen } from './ui'
+
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal<typeof React>()
+  return { ...actual, useState: vi.fn(actual.useState) }
+})
+
+afterEach(() => vi.mocked(React.useState).mockReset())
 
 function card(status: RewardStatus, disabled = false) {
   const quest: DailyQuest = {
@@ -12,7 +19,9 @@ function card(status: RewardStatus, disabled = false) {
     completed: status !== 'in_progress',
     rewardStatus: status,
   }
-  return renderToStaticMarkup(createElement(QuestCard, { quest, disabled, onClaim: () => {} }))
+  return renderToStaticMarkup(
+    React.createElement(QuestCard, { quest, disabled, onClaim: () => {} }),
+  )
 }
 
 describe('Daily Quests rendered markup', () => {
@@ -53,13 +62,27 @@ describe('Daily Quests rendered markup', () => {
   })
 
   it('renders a French loading announcement before client effects run', () => {
-    const html = renderToStaticMarkup(createElement(QuestsScreen))
+    const html = renderToStaticMarkup(React.createElement(QuestsScreen))
     expect(html).toContain('lang="fr"')
     expect(html).toContain('Quêtes quotidiennes')
     expect(html).toContain('role="status"')
     expect(html).toContain('Chargement des quêtes…')
     expect(html).toContain('data-status="connecting"')
     expect(html).toContain('Connexion au temps réel…')
+    expect(html).not.toContain('Actualiser')
+    expect(html).not.toContain('Réessayer')
+  })
+
+  it.each([false, true])('offers retry only after loading fails and stops (busy: %s)', (busy) => {
+    vi.mocked(React.useState)
+      .mockReturnValueOnce([undefined, vi.fn()])
+      .mockReturnValueOnce([busy, vi.fn()])
+      .mockReturnValueOnce(['Impossible de charger les quêtes. Veuillez réessayer.', vi.fn()])
+    const html = renderToStaticMarkup(React.createElement(QuestsScreen))
+    expect(html).toContain('role="alert"')
+    expect(html).toContain('Impossible de charger les quêtes.')
+    expect(html.includes('>Réessayer</button>')).toBe(!busy)
+    expect(html).not.toContain('Actualiser')
   })
 
   it.each([
@@ -67,7 +90,7 @@ describe('Daily Quests rendered markup', () => {
     { quest: QUESTS[2], reward: '100 or' },
   ])('renders the French reward label for $quest.id', ({ quest, reward }) => {
     const html = renderToStaticMarkup(
-      createElement(QuestCard, {
+      React.createElement(QuestCard, {
         quest: { ...quest, progress: 0, completed: false, rewardStatus: 'in_progress' },
         disabled: false,
         onClaim: () => {},
