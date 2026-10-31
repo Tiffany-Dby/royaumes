@@ -31,8 +31,8 @@ export function createVillageServiceApp({ db, secret, appUrl, clock, fetch }: Vi
   const store = createEventStore(db)
   const realm = createRealmModule({ store, clock })
 
-  // Boîte d'envoi du service : les messages du Village sont traités ici ; tous les autres,
-  // c'est-à-dire les réponses adressées au Marché, sont transmis à l'application.
+  // Village messages are handled locally; other topics, including Market replies and
+  // Quests delivery confirmations, are forwarded to the application.
   const dispatcher = createDispatcher(db)
   dispatcher.register(realm.handlers)
   dispatcher.registerFallback(forwardTo(`${appUrl}/api/internal`, secret, fetch))
@@ -48,19 +48,17 @@ export function createVillageServiceApp({ db, secret, appUrl, clock, fetch }: Vi
       .use('/realm/*', playerFromHeaders)
       .route('/realm', realm.api)
 
-      // Boîte de réception : messages de la saga du Marché. Les réponses produites sont
-      // distribuées aussitôt, c'est-à-dire transmises à l'application.
-      // DETTE TECHNIQUE (docs/qualite/dette-technique.md, service Village) : la boîte d'envoi
-      // du service n'est distribuée qu'à la réception d'un message ; une réponse qui n'a pu
-      // être transmise attend le message suivant.
+      // Incoming messages trigger dispatch of the replies produced by their handlers.
+      // DETTE TECHNIQUE DT-010 (docs/qualite/dette-technique.md): without another incoming
+      // message, failed Market replies or Quests confirmations have no dispatch trigger.
       .route(
         '/',
         createInboxApi(dispatcher, secret, () => dispatcher.dispatch()),
       )
 
       // Flux d'événements publié : les événements du Village postérieurs à une position.
-      // DETTE TECHNIQUE (docs/qualite/dette-technique.md, service Village) : le flux est
-      // renvoyé en une seule réponse, sans pagination.
+      // DETTE TECHNIQUE DT-009 (docs/qualite/dette-technique.md): the entire event backlog
+      // is returned in one response without pagination.
       .get('/events', async (c) => {
         const after = Number(c.req.query('after') ?? 0) || 0
         const events = await store.readAll({

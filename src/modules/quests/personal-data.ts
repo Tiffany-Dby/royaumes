@@ -51,6 +51,8 @@ export function createQuestsPersonalData(
         role: trade.sellerId === playerId ? 'seller' : 'buyer',
       }))
       const [village] = await db.select().from(villages).where(eq(villages.playerId, playerId))
+      // DETTE TECHNIQUE DT-012 (docs/qualite/dette-technique.md): exports read all players'
+      // claim history and repeatedly scan it for confirmations; cost can grow with global history.
       const history = await store.readAll({
         streamPrefix: CLAIM_STREAM_PREFIX,
         types: ['QuestRewardClaimAccepted', 'QuestRewardDelivered'],

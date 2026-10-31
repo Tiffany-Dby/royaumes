@@ -68,8 +68,8 @@ export function createRemoteRealmModule({
 
     let relayed = 0
     for (const event of events) {
-      // Une position manquante récente correspond peut-être à une insertion en cours dans
-      // le service : le relais s'arrête, et reprendra à la lecture suivante (TD8).
+      // DETTE TECHNIQUE DT-011 (docs/qualite/dette-technique.md): the relay shares the gap
+      // heuristic; local projection rebuilds cannot recover source events it has skipped.
       const gap = event.position !== position + 1
       if (gap && now() - new Date(event.occurredAt).getTime() < GAP_GRACE_MS) break
       try {

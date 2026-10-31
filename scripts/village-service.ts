@@ -16,9 +16,8 @@ const secret = process.env.SERVICE_SECRET
 if (!secret) throw new Error('SERVICE_SECRET est obligatoire : il authentifie les échanges.')
 const port = Number(process.env.PORT ?? 4000)
 
-// DETTE TECHNIQUE (docs/qualite/dette-technique.md, service Village) : la base locale reçoit
-// toutes les migrations de l'application, y compris les tables des autres modules ; une base
-// désignée par VILLAGE_DATABASE_URL n'en reçoit aucune.
+// DETTE TECHNIQUE DT-008 (docs/qualite/dette-technique.md): local storage uses all application
+// migrations; a database selected by VILLAGE_DATABASE_URL receives none here.
 const { db, ready } = createDatabase(process.env.VILLAGE_DATABASE_URL, 'village')
 await ready
 

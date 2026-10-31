@@ -99,9 +99,9 @@ export function createProjectionRunner(
 
       let blocked = false
       for (const row of rows) {
-        // Une position manque avant cet événement. Si l'événement est récent, l'insertion
-        // manquante est peut-être encore en cours : la projection s'arrête et l'attendra.
-        // S'il est ancien, la position manquante correspond à une insertion annulée.
+        // DETTE TECHNIQUE DT-011 (docs/qualite/dette-technique.md): gap age is a heuristic,
+        // not proof that earlier transactions have finished. A late commit behind the
+        // checkpoint may require rebuilding once it is visible in the journal.
         const gap = row.position !== position + 1
         if (gap && now() - row.occurredAt.getTime() < gapGraceMs) {
           blocked = true

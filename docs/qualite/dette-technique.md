@@ -2,10 +2,12 @@
 
 Ce registre recense les raccourcis pris délibérément dans le projet. Chaque entrée
 indique la nature du raccourci, ses conséquences et l'échéance prévue pour son
-remboursement. Une entrée remboursée n'est pas supprimée : elle passe au statut « remboursée ».
+remboursement ou son réexamen. Une échéance peut être un déclencheur de revue plutôt
+qu'une date fixe. Une entrée remboursée n'est pas supprimée : elle passe au statut « remboursée ».
 
 Dans le code, chaque raccourci est signalé par un commentaire commençant par
-`DETTE TECHNIQUE`, qui renvoie à ce registre.
+`DETTE TECHNIQUE DT-XXX`, qui renvoie à ce registre. Les entrées remboursées ne nécessitent
+plus de commentaire dans le code.
 
 | N° | Raccourci | Conséquences | Échéance | Statut |
 | --- | --- | --- | --- | --- |
@@ -18,4 +20,6 @@ Dans le code, chaque raccourci est signalé par un commentaire commençant par
 | DT-007 | Messages abandonnés (lettres mortes) seulement comptés par la tâche quotidienne de la boîte d'envoi (`src/bootstrap/create-api.ts`) | Une saga interrompue par un message abandonné, par exemple une offre bloquée en règlement avec des ressources en séquestre, n'est détectée qu'en interrogeant la base, et ne peut être relancée que par une requête SQL | TD11 (revue de qualité) | Remboursée au TD11 : script `scripts/dead-letters.ts`, avertissement de la tâche quotidienne |
 | DT-008 | Migrations du service Village : la base locale reçoit toutes les migrations de l'application, une base désignée par `VILLAGE_DATABASE_URL` n'en reçoit aucune (`scripts/village-service.ts`) | La base du service contient les tables vides des autres modules ; un déploiement du service n'a pas de procédure de migration | Extraction du Village en production (ADR 0009) | Ouverte |
 | DT-009 | Flux d'événements publié par le service Village renvoyé en une seule réponse, sans pagination (`src/services/village/village-service.ts`) | Après une longue interruption du relais, une réponse volumineuse, longue à produire et à recopier | Extraction du Village en production (ADR 0009) | Ouverte |
-| DT-010 | Boîte d'envoi du service Village distribuée seulement à la réception d'un message (`src/services/village/village-service.ts`) | Une réponse au Marché qui n'a pu être transmise attend le message suivant : sans autre échange, une saga peut rester en attente | Extraction du Village en production (ADR 0009) | Ouverte |
+| DT-010 | Boîte d'envoi du service Village distribuée seulement à la réception d'un message (`src/services/village/village-service.ts`) | Une réponse au Marché ou une confirmation Quests qui n'a pu être transmise dépend d'un nouveau message pour être retentée : sans autre échange, la saga ou la confirmation peut rester en attente | Extraction du Village en production (ADR 0009) | Ouverte |
+| DT-011 | Projections et relais Village : franchissement des positions manquantes après un délai heuristique de cinq secondes par défaut, sans preuve de fin des transactions (`src/platform/projection/projection.ts`, `src/modules/realm/remote.ts`) ; reprise plus robuste à étudier | Une validation tardive derrière le curseur peut être omise. Une projection peut être reconstruite après validation si l'événement figure dans le journal local ; reconstruire ne récupère pas un événement absent parce que le relais l'a sauté : sa récupération doit précéder le rejeu | Réexamen avant d'exiger une reprise exhaustive sous transactions longues (déclencheur de revue) | Ouverte |
+| DT-012 | Export Quests : lecture de l'historique des réclamations de tous les joueurs, filtrage ensuite et recherche répétée des confirmations (`src/modules/quests/personal-data.ts`) ; lectures ciblées et indexation des confirmations en mémoire à prévoir | Coût potentiel de lecture et de mémoire lié à l'historique global, avec des parcours répétés pour les réclamations du joueur ; aucune régression de performance mesurée | Premier essai volumétrique des exports, avant élargissement de l'audience (déclencheur de revue) | Ouverte |
