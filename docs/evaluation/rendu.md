@@ -19,16 +19,16 @@
 | E5 | API et bootstrap : session obligatoire, identité du joueur et validation des entrées. | [quests-api.test.ts](../../src/bootstrap/quests-api.test.ts) : authentification, isolation, entrées invalides et vue périmée. |
 | E6 | [Projection](../../src/modules/quests/infrastructure/progress-projection.ts), [service de réclamation](../../src/modules/quests/application/claim-service.ts), [confirmations](../../src/modules/quests/messages.ts) ; [ADR-0011](../adr/0011-daily-quests-communication.md). | Tests de projection, persistance et API : progression des participants, dépôts, confirmations et reprises. |
 | E7 | [personal-data.ts](../../src/modules/quests/personal-data.ts), [registre T8](../rgpd/registre-traitements.md), [revue de sécurité](../qualite/revue-securite-quests.md). | [quests-privacy.test.ts](../../src/bootstrap/quests-privacy.test.ts) : export isolé, suppression du compte et reconstruction. |
-| E8 | Domaine et API ci-dessus ; correspondance BR-01–BR-12 en complément. | Tests métier, GET/POST et [SSE](../../src/bootstrap/quests-realtime.test.ts), dont `/events`. E8 reste à confirmer pour BR-10, dont le transport est testé en intégration. |
+| E8 | Domaine et API ci-dessus ; correspondance BR-01–BR-12 en complément. | Validé : décisions métier BR-01–BR-12 couvertes par les tests du domaine ; GET `/api/quests` et POST `/api/quests/:id/claim` par les [tests API](../../src/bootstrap/quests-api.test.ts) ; SSE `/api/stream/quests` et son repli `/events` par les [tests temps réel](../../src/bootstrap/quests-realtime.test.ts). Les garanties de checkpoint, d'outbox et de concurrence sont testées en intégration. |
 | E9 | [.dependency-cruiser.cjs](../../.dependency-cruiser.cjs), règles existantes conservées. | `pnpm lint:archi` et [architecture.test.ts](../../src/bootstrap/architecture.test.ts) réussissent. |
-| E10 | [vercel.json](../../vercel.json), [migrate.ts](../../scripts/migrate.ts), [déploiement Vercel de `8268285`](https://vercel.com/tiffany-dbys-projects/royaumes/5CUBqCHFeCn5638XZEWMB7uFGfin). | Déploiement signalé réussi par Vercel dans GitHub ; Quests et les fonctionnalités existantes testés manuellement en production. Seule la confirmation explicite des migrations 0013–0016 reste à relever. |
+| E10 | [vercel.json](../../vercel.json), [migrate.ts](../../scripts/migrate.ts), [déploiement Vercel de `8268285`](https://vercel.com/tiffany-dbys-projects/royaumes/5CUBqCHFeCn5638XZEWMB7uFGfin). | Validé : contrôles, migrations, build et déploiement réussis ; Quests et les fonctionnalités existantes testés manuellement en production. |
 
-E2 est validé. Pour E10, la chaîne de build prévoit les migrations avant la construction,
-mais leur exécution reste à confirmer dans le journal Vercel ou l'historique des migrations
-de production. Ces preuves n'étaient pas accessibles lors de cette mise à jour.
+E2 et E10 sont validés. J'ai vérifié les journaux Vercel de `8268285` : `pnpm verify`
+réussit avec 445 tests et aucune violation d'architecture, `pnpm db:migrate` indique
+« Migrations appliquées. », puis le build Next.js et le déploiement réussissent.
 Les tests fonctionnels ne couvrent pas les contrôles ciblés encore ouverts : isolation
 API/SSE entre deux comptes, export, suppression avec invalidation de session, reconnexions
-et cron. La question E8 reste inchangée.
+et cron.
 
 ## Bonus revendiqués
 

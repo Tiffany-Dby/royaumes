@@ -48,9 +48,11 @@ le Donjon les expéditions et l'IA, le Marché les échanges, le Classement leur
 la Taverne les messages et la présence, et Quests les objectifs quotidiens et récompenses.
 
 Royaumes est déployé sur [Vercel](https://royaumes-theta.vercel.app), avec Neon à Francfort
-et le Village intégré à l'application. Le déploiement du commit `8268285` sur Vercel a réussi. Tiffany DBEISSY a testé Quests et les fonctionnalités existantes
-en production, sans problème constaté. La confirmation explicite des migrations 0013–0016
-reste à relever dans le journal de build ou l'historique des migrations de production.
+et le Village intégré à l'application. Les journaux Vercel de `8268285`, vérifiés par
+Tiffany DBEISSY, confirment la réussite de `pnpm verify` (445 tests, aucune violation
+d'architecture), de `pnpm db:migrate` (« Migrations appliquées. »), du build Next.js et
+du déploiement. Quests et les fonctionnalités existantes ont été testés manuellement
+en production, sans problème constaté : E10 est validé.
 Le service Village autonome reste un prototype testé, non déployé ; PGlite sert en local
 et dans les tests automatisés.
 
@@ -190,7 +192,7 @@ journaux techniques et vérification des tâches de production.
 | 1 | Progression retardée, notification manquée ou récompense en attente | Réponses `503 QUESTS_NOT_READY`, statut `pending` persistant, lettres mortes ou écart avec le journal | Diagnostiquer les curseurs et messages ; récupérer les événements absents avant reconstruction ; reprendre les livraisons selon les limites des ADR. Aucun délai de versement garanti. |
 | 2 | Base applicative utilisée involontairement par le prototype Village | `VILLAGE_DATABASE_URL` absent et `DATABASE_URL` défini : `createDatabase()` choisit ce dernier | Clarifier ce choix avant exploitation du service autonome. Risque confirmé avec la fabrique isolée et des entrées/sorties simulées, sans connexion réelle ; non corrigé. |
 | 3 | Conservation pseudonyme sans échéance ni critères de purge | Historiques et références toujours présents après suppression ; politique de durée non définie | Faire revoir justification et durées, compléter le responsable du traitement ; vérifier export, suppression et invalidation des sessions avec des comptes réels. L'acceptation architecturale ne démontre pas la conformité au RGPD. |
-| 4 | Vérifications techniques de production encore ouvertes | Preuve d'exécution des migrations non consultée ; reconnexions SSE et cron non vérifiés spécifiquement | Relever la confirmation des migrations, puis effectuer les contrôles SSE et cron. Les parcours fonctionnels sont validés ; le rendu Mermaid sur GitHub reste à contrôler séparément. |
+| 4 | Vérifications techniques de production encore ouvertes | Reconnexions SSE et cron non vérifiés spécifiquement | Effectuer les contrôles SSE et cron. Les parcours fonctionnels sont validés ; le rendu Mermaid sur GitHub reste à contrôler séparément. |
 | 5 | Limites de gameplay | Tous les bâtiments au niveau 10 rendent le Bâtisseur impossible les jours suivants ; expéditions à quatre faciles | Réexaminer les objectifs et l'équilibrage si les besoins évoluent ; ne pas confondre ces limites avec les dettes techniques. |
 
 Le risque de configuration concerne le prototype extrait, non le Village intégré au monolithe.
@@ -204,8 +206,8 @@ de tests sans modification des fichiers de tests historiques. Le choix d'une sol
 à chaque besoin — événements, projections ou tables ordinaires — évite une infrastructure
 uniforme inutile. La contrepartie principale est l'exploitation de la cohérence différée :
 reprise, supervision et confidentialité doivent rester explicites. Les contrôles locaux et
-les essais fonctionnels en production sont réussis. Restent la preuve des migrations,
-les contrôles techniques ciblés et les questions de conservation.
+les essais fonctionnels en production sont réussis ; les migrations et le déploiement
+sont confirmés. Restent les contrôles techniques ciblés et les questions de conservation.
 
 ## Usage de l'IA générative
 
