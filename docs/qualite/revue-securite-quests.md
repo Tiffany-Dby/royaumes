@@ -5,8 +5,8 @@
 - Références : OWASP Top 10 (A01 Broken Access Control, A04 Insecure Design, A08 Software and Data Integrity Failures), [ADR 0010](../adr/0010-daily-quests-persistence.md) et [ADR 0011](../adr/0011-daily-quests-communication.md).
 
 Vérification locale du 31 octobre : **178 tests réussis dans 8 fichiers**, avec PGlite et
-un adaptateur d'authentification de test. Le navigateur avec sessions réelles et la production
-n'ont pas été vérifiés.
+un adaptateur d'authentification de test. Tiffany DBEISSY a ensuite validé le fonctionnement
+de Quests en production ; les constats de sécurité ci-dessous reposent sur les tests locaux.
 
 | N° | Exigence | Vérification | Constat | Statut |
 | --- | --- | --- | --- | --- |
@@ -31,6 +31,7 @@ architectural ne constitue pas une conclusion de conformité au RGPD.
 
 Conserver les tests de non-régression et prévoir le traitement des lettres mortes ; les limites
 de livraison, de projection et de reprise SSE sont décrites dans les ADR 0010 et 0011.
-Avant validation du déploiement, vérifier avec deux comptes réels l'authentification,
-l'isolation API/SSE, les reconnexions, la livraison, l'export et l'invalidation de session
-après suppression, ainsi que les migrations et la distribution planifiée.
+Restent à vérifier en production avec deux comptes réels : l'isolation API/SSE, les
+reconnexions, l'export et la suppression avec invalidation de session, ainsi que la
+distribution planifiée. Le suivi du déploiement et des migrations figure dans le
+[rendu](../evaluation/rendu.md).

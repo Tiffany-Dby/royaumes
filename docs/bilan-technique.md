@@ -2,6 +2,7 @@
 
 - Date : 2026-10-31
 - Version examinée : `3efddd5`, avant la rédaction de ce bilan.
+- Déploiement : `8268285`, tests fonctionnels manuels validés par Tiffany DBEISSY.
 - Référence historique : `td11-fin`, commit `b681e18`.
 - Auteur : Tiffany DBEISSY
 
@@ -46,10 +47,12 @@ technologies ; la composition assemble leurs adaptateurs. Le Village gère les r
 le Donjon les expéditions et l'IA, le Marché les échanges, le Classement leurs résultats,
 la Taverne les messages et la présence, et Quests les objectifs quotidiens et récompenses.
 
-La configuration de production vise Vercel et Neon à Francfort, avec le Village dans
-l'application. Le service Village autonome est un prototype exécutable et testé, non déployé.
-PGlite fournit PostgreSQL en local et dans les tests ; ces résultats ne valident pas à eux
-seuls le comportement du déploiement Neon/Vercel.
+Royaumes est déployé sur [Vercel](https://royaumes-theta.vercel.app), avec Neon à Francfort
+et le Village intégré à l'application. Le déploiement du commit `8268285` sur Vercel a réussi. Tiffany DBEISSY a testé Quests et les fonctionnalités existantes
+en production, sans problème constaté. La confirmation explicite des migrations 0013–0016
+reste à relever dans le journal de build ou l'historique des migrations de production.
+Le service Village autonome reste un prototype testé, non déployé ; PGlite sert en local
+et dans les tests automatisés.
 
 ## 2. Les décisions d'architecture
 
@@ -86,12 +89,12 @@ du contexte de participation et des obligations de conservation.
 
 | Caractéristique | Indicateur | Valeur | Appréciation |
 | --- | --- | --- | --- |
-| Adéquation fonctionnelle | Tests réussis ; couverture des domaines | 445 tests réussis ; lignes des domaines couvertes de 99,60 à 100 % | Règles et cas limites éprouvés ; les interactions de navigateur restent à vérifier. |
+| Adéquation fonctionnelle | Tests réussis ; couverture des domaines | 445 tests réussis ; lignes des domaines couvertes de 99,60 à 100 % | Règles et cas limites éprouvés ; Quests et les fonctionnalités existantes testés manuellement en production. |
 | Efficacité des performances | Débit et p99 des lectures ; respect du budget | Archives TD11 « après » : 600–1 176 req/s, p99 de 26 à 54 ms, aucune erreur | Budget historique respecté sur cinq lectures ; aucune mesure actuelle de Quests ou de son export. |
 | Fiabilité | Tests de concurrence, de reprise et d'idempotence ; messages abandonnés | Tests réussis ; nombre de lettres mortes en production non mesuré | Atomicité et doublons couverts ; livraison et reprise exhaustive restent soumises aux limites documentées. |
 | Sécurité | Exigences des revues de sécurité | Cinq revues disponibles, dont 11 exigences Quests ; détail en section 5 | Non-conformités et risques acceptés à distinguer ; aucune nouvelle validation exhaustive de production. |
 | Maintenabilité | Règles d'architecture ; fonctions d'aptitude ; couverture | 9 règles sans violation ; 2 tests structurels réussis ; 76,86 % des lignes couvertes | Frontières contrôlées, code historique conservé ; couverture partielle, notamment des interfaces. |
-| Flexibilité | Extraction d'un module ; changement de base entre local et production | Six tests de contrat du Village extrait réussis ; tests exécutés sur PGlite | Extraction éprouvée sans déploiement ; le comportement sur Neon n'a pas été vérifié ici. |
+| Flexibilité | Extraction d'un module ; changement de base entre local et production | Six tests de contrat du Village extrait réussis ; tests exécutés sur PGlite | Monolithe testé en production sur Neon ; prototype Village extrait testé localement, toujours non déployé. |
 
 Mesures locales du 31 octobre, avec Node.js 22.20.0, pnpm 10.34.7 et Vitest 5.0.4.
 `pnpm verify` réussit sur l'état actuel : lint, typage, dépendances et tests.
@@ -164,7 +167,7 @@ ont leurs commentaires `DETTE TECHNIQUE DT-XXX` correspondants dans le code.
 | Sécurité de l'authentification | 16 | 11 | 5 non conformes ; 0 risque accepté | Corriger le décompte de synthèse ; réexaminer limitation hors Vercel, secret/HTTPS, inscription, cookies et déconnexion. |
 | Sécurité du Donjon | 14 | 12 | 0 non conforme ; 2 risques acceptés | Réexaminer la consultation par adresse et les métadonnées divulguées si les besoins de confidentialité changent. |
 | Sécurité du Marché | 10 | 10 | 0 non conforme ; 0 risque accepté | Conserver les contrôles de concurrence et d'idempotence. |
-| Sécurité de Quests | 11 | 10 | 0 non conforme ; 1 risque accepté | Revoir conservation et purge ; effectuer les contrôles navigateur/production. |
+| Sécurité de Quests | 11 | 10 | 0 non conforme ; 1 risque accepté | Revoir conservation et purge ; vérifier en production isolation API/SSE, export, suppression et invalidation des sessions. |
 | Conformité au RGPD | 10 | 4 | 6 non conformes ; 0 risque accepté | Actualiser les constats, compléter registre/export, réexaminer sessions expirées, journaux et exécution du cron. |
 
 Sources : revues de [l'authentification](qualite/revue-securite-authentification.md),
@@ -187,7 +190,7 @@ journaux techniques et vérification des tâches de production.
 | 1 | Progression retardée, notification manquée ou récompense en attente | Réponses `503 QUESTS_NOT_READY`, statut `pending` persistant, lettres mortes ou écart avec le journal | Diagnostiquer les curseurs et messages ; récupérer les événements absents avant reconstruction ; reprendre les livraisons selon les limites des ADR. Aucun délai de versement garanti. |
 | 2 | Base applicative utilisée involontairement par le prototype Village | `VILLAGE_DATABASE_URL` absent et `DATABASE_URL` défini : `createDatabase()` choisit ce dernier | Clarifier ce choix avant exploitation du service autonome. Risque confirmé avec la fabrique isolée et des entrées/sorties simulées, sans connexion réelle ; non corrigé. |
 | 3 | Conservation pseudonyme sans échéance ni critères de purge | Historiques et références toujours présents après suppression ; politique de durée non définie | Faire revoir justification et durées, compléter le responsable du traitement ; vérifier export, suppression et invalidation des sessions avec des comptes réels. L'acceptation architecturale ne démontre pas la conformité au RGPD. |
-| 4 | Validation opérationnelle incomplète | Absence de vérification actuelle du déploiement Ready, des migrations, du cron et des parcours réels | Éprouver les modules, le règlement, les reconnexions SSE et les interfaces sur le déploiement cible ; vérifier aussi Mermaid sur GitHub. Ces contrôles n'ont pas été réalisés ici. |
+| 4 | Vérifications techniques de production encore ouvertes | Preuve d'exécution des migrations non consultée ; reconnexions SSE et cron non vérifiés spécifiquement | Relever la confirmation des migrations, puis effectuer les contrôles SSE et cron. Les parcours fonctionnels sont validés ; le rendu Mermaid sur GitHub reste à contrôler séparément. |
 | 5 | Limites de gameplay | Tous les bâtiments au niveau 10 rendent le Bâtisseur impossible les jours suivants ; expéditions à quatre faciles | Réexaminer les objectifs et l'équilibrage si les besoins évoluent ; ne pas confondre ces limites avec les dettes techniques. |
 
 Le risque de configuration concerne le prototype extrait, non le Village intégré au monolithe.
@@ -200,17 +203,18 @@ L'extension Quests s'appuie sur les frontières et mécanismes déjà éprouvés
 de tests sans modification des fichiers de tests historiques. Le choix d'une solution adaptée
 à chaque besoin — événements, projections ou tables ordinaires — évite une infrastructure
 uniforme inutile. La contrepartie principale est l'exploitation de la cohérence différée :
-reprise, supervision et confidentialité doivent rester explicites. La validation locale est
-réussie ; les vérifications opérationnelles et les questions de conservation restent ouvertes.
+reprise, supervision et confidentialité doivent rester explicites. Les contrôles locaux et
+les essais fonctionnels en production sont réussis. Restent la preuve des migrations,
+les contrôles techniques ciblés et les questions de conservation.
 
 ## Usage de l'IA générative
 
 Les ADR historiques déclarent, selon les décisions, aucune assistance ou l'aide d'un assistant,
 notamment GitHub Copilot. Pour Quests, ChatGPT a soutenu les discussions d'architecture et
-Codex a assisté l'implémentation, les tests et la documentation. Le porteur du projet a examiné
+Codex a assisté l'implémentation, les tests et la documentation. La porteuse du projet a examiné
 et approuvé progressivement les propositions et périmètres.
 
 Ce bilan a été rédigé avec Codex à partir du code, des documents et des commandes exécutées.
 Les chiffres sont issus des sorties locales et des rapports de couverture ; les références
-et le diff ont été contrôlés. Aucune validation de navigateur ou de production n'est attribuée
-à l'IA ou supposée réalisée.
+et le diff ont été contrôlés. Les tests fonctionnels en production ont été réalisés par
+Tiffany DBEISSY, pas par l'IA.
