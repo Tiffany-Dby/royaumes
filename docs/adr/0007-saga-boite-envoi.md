@@ -34,15 +34,23 @@
 	transaction que les événements qui l'ont produit. Les gestionnaires utilisent une clé
 	d'idempotence stable choisie par le demandeur ; pour un mouvement de ressources, c'est
 	`transferId`.
-- La livraison est garantie au moins une fois. Le distributeur réserve les messages avec un
-	bail, retente les échecs avec un recul exponentiel et abandonne un message après dix
-	tentatives. Les messages abandonnés restent en base, sans outil de consultation dédié.
+- Le distributeur réserve les messages avec un bail et peut les remettre plusieurs fois,
+	sans garantie de traitement réussi. Il retente les échecs avec un recul exponentiel et
+	abandonne un message après dix tentatives. Les messages abandonnés restent en base ;
+	`scripts/dead-letters.ts` permet de les consulter et de les remettre en attente.
 - La distribution est déclenchée après les commandes du Marché et la consultation de sa
 	liste. Une tâche planifiée protégée par `CRON_SECRET` la déclenche également une fois par
 	jour ; la boîte d'envoi sert aussi à différer les rappels d'expiration des offres.
 
 Cette décision est mise en œuvre dans le moteur de la boîte d'envoi
 ([`outbox.ts`](../../src/platform/outbox/outbox.ts)), le Marché et le Village.
+
+**Clarification du 31 octobre 2026 :** la rédaction initiale annonçait une livraison garantie
+et l'absence d'outil de lettres mortes. Ces passages sont corrigés : les reprises sont
+bornées, sans délai garanti, et DT-007 est remboursée par
+[`scripts/dead-letters.ts`](../../scripts/dead-letters.ts), avec un
+[test de relance](../../src/platform/outbox/outbox.test.ts#L164).
+La décision d'orchestration et les frontières transactionnelles sont conservées.
 
 ## Conséquences
 
@@ -70,10 +78,11 @@ Cette décision est mise en œuvre dans le moteur de la boîte d'envoi
 	réservation ou en règlement, pendant que la saga attend une réponse ou une livraison.
 - La latence dépend de l'activité : une saga interrompue reprend à la prochaine commande ou
 	consultation de la liste du Marché, ou au prochain passage de la tâche quotidienne.
-- La livraison au moins une fois impose des gestionnaires idempotents et des tests couvrant
+- Les remises répétées imposent des gestionnaires idempotents et des tests couvrant
 	les doublons, les interruptions et les réponses tardives.
-- Après dix tentatives, un message est abandonné. Aucun outil ne permet actuellement
-	d'examiner ni de rejouer ces messages (dette DT-007).
+- Après dix tentatives, un message est abandonné et demande une intervention. Le script
+	permet de le remettre en attente après correction de sa cause ; la distribution suivante
+	le retente, sans que le script le distribue lui-même.
 - Les messages traités sont conservés dans la boîte d'envoi ; sa table grandit sans limite
 	tant qu'aucune politique de purge ou d'archivage n'est définie.
 - Les reprises ne garantissent pas un délai maximal de terminaison : l'hébergement n'exécute
@@ -115,3 +124,6 @@ GitHub Copilot a aidé à structurer et rédiger cet ADR à partir de la consign
 frontières transactionnelles, étapes de la saga, règles d'idempotence et modalités de
 distribution ont été recoupées avec le code du Marché, du Village et de la boîte d'envoi,
 ainsi qu'avec les ADR-0001 et ADR-0004.
+
+Codex a aidé à vérifier et rédiger la clarification du 31 octobre à partir du code et
+des tests existants.

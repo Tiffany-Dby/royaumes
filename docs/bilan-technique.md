@@ -166,11 +166,11 @@ ont leurs commentaires `DETTE TECHNIQUE DT-XXX` correspondants dans le code.
 
 | Revue | Exigences | Conformes | Non conformes ou en risque accepté | Actions ouvertes |
 | --- | --- | --- | --- | --- |
-| Sécurité de l'authentification | 16 | 11 | 5 non conformes ; 0 risque accepté | Corriger le décompte de synthèse ; réexaminer limitation hors Vercel, secret/HTTPS, inscription, cookies et déconnexion. |
+| Sécurité de l'authentification | 16 | 11 | 5 non conformes ; 0 risque accepté | Réexaminer limitation hors Vercel, secret/HTTPS, inscription, cookies et déconnexion. |
 | Sécurité du Donjon | 14 | 12 | 0 non conforme ; 2 risques acceptés | Réexaminer la consultation par adresse et les métadonnées divulguées si les besoins de confidentialité changent. |
 | Sécurité du Marché | 10 | 10 | 0 non conforme ; 0 risque accepté | Conserver les contrôles de concurrence et d'idempotence. |
 | Sécurité de Quests | 11 | 10 | 0 non conforme ; 1 risque accepté | Revoir conservation et purge ; vérifier en production isolation API/SSE, export, suppression et invalidation des sessions. |
-| Conformité au RGPD | 10 | 4 | 6 non conformes ; 0 risque accepté | Actualiser les constats, compléter registre/export, réexaminer sessions expirées, journaux et exécution du cron. |
+| Conformité au RGPD | 10 | 4 | 6 non conformes ; 0 risque accepté | Compléter registre/export, définir conservation et purge, réexaminer sessions expirées, journaux et exécution du cron. |
 
 Sources : revues de [l'authentification](qualite/revue-securite-authentification.md),
 du [Donjon](qualite/revue-securite-donjon.md), du [Marché](qualite/revue-securite-marche.md),
@@ -178,10 +178,6 @@ de [Quests](qualite/revue-securite-quests.md) et du [RGPD](rgpd/revue-conformite
 Le tableau compte leurs statuts versionnés ; ce n'est pas une nouvelle vérification
 navigateur ou production de chacune de leurs exigences.
 
-Trois écarts documentaires restent à traiter séparément : la synthèse d'authentification
-annonce 9 conformités et 6 non-conformités, contrairement à ses lignes ; la revue RGPD
-précède Quests et les ajouts récents au registre ; l'ADR-0007 annonce encore une garantie de
-livraison et l'absence d'outil de lettres mortes. Aucun de ces documents n'a été réécrit ici.
 Les actions anciennes restent à réévaluer, notamment sessions expirées, export complet,
 journaux techniques et vérification des tâches de production.
 

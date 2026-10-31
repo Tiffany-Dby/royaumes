@@ -25,6 +25,6 @@
 
 ## Synthèse
 
-9 exigences conformes, 6 non conformes, 0 risque accepté.
+11 exigences conformes, 5 non conformes, 0 risque accepté.
 
 Actions à décider : limiter la désactivation du rate limiting au développement ; imposer une URL HTTPS et un secret explicite dans tous les environnements de production ; activer une réponse générique à l'inscription d'une adresse déjà utilisée ; choisir une politique de cookie répondant à l'exigence intersite ; faire échouer la déconnexion si la suppression de session échoue et ajouter un test de réutilisation du cookie.

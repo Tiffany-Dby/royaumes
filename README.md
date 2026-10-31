@@ -163,7 +163,7 @@ Le jeu traite des données personnelles, recensées dans le
 [registre des traitements](docs/rgpd/registre-traitements.md). Chaque joueur peut, depuis la
 page « Mes données » :
 
-- télécharger l'ensemble de ses données au format JSON (`GET /api/account/export`) ;
+- télécharger un export JSON de ses données (`GET /api/account/export`) ;
 - supprimer son compte (`DELETE /api/account`) : l'identité et les sessions sont supprimées,
   chaque module applique sa politique d'effacement, et les noms concernés sont remplacés
   par une mention neutre dans le journal (ADR 0008). Chaque effacement est consigné dans
@@ -223,6 +223,7 @@ sans la première ; sans la seconde, la route des tâches quotidiennes reste fer
 - [ADR 0010 — Persistance des Quêtes quotidiennes](docs/adr/0010-daily-quests-persistence.md)
 - [ADR 0011 — Communication et temps réel des Quêtes](docs/adr/0011-daily-quests-communication.md)
 - [Fiche de cadrage des Quêtes quotidiennes](docs/evaluation/fiche-cadrage.md)
+- [Rendu de l'évaluation finale](docs/evaluation/rendu.md)
 - [Registre de la dette technique](docs/qualite/dette-technique.md)
 - [Revue de sécurité de l'authentification](docs/qualite/revue-securite-authentification.md)
 - [Revue de sécurité du Donjon](docs/qualite/revue-securite-donjon.md)
