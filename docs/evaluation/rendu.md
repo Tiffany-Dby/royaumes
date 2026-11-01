@@ -4,9 +4,10 @@
 - Module : Quêtes quotidiennes
 - Adresse du déploiement : [royaumes-theta.vercel.app](https://royaumes-theta.vercel.app) — Royaumes est déployé sur Vercel ([dépôt](https://github.com/Tiffany-Dby/royaumes)).
 - Fiche de cadrage : [fiche-cadrage.md](fiche-cadrage.md)
-- Date : 2026-10-31
-- Référence Git : `8268285` ; comparaison avec `td11-fin` (`b681e18`).
-- Statut : contrôles finaux en cours.
+- Date : 2026-11-01
+- Référence Git actuelle : `4da783c` (correctif E7) ; comparaison avec `td11-fin` (`b681e18`).
+- Déploiement de production vérifié : `4da783c`, correctif E7 inclus.
+- Statut : validations locales et en production terminées.
 
 ## Exigences minimales
 
@@ -18,17 +19,22 @@
 | E4 | [Schéma](../../src/modules/quests/infrastructure/schema.ts), migrations [0013](../../drizzle/0013_quest-progress.sql), [0014](../../drizzle/0014_quest-dungeon-progress.sql), [0015](../../drizzle/0015_quest-market-progress.sql), [0016](../../drizzle/0016_quest-villages.sql), [repository](../../src/modules/quests/infrastructure/event-store-claim-repository.ts) ; [ADR-0010](../adr/0010-daily-quests-persistence.md). | [claim-persistence.test.ts](../../src/modules/quests/infrastructure/claim-persistence.test.ts) : atomicité et concurrence ; [progress-projection.test.ts](../../src/modules/quests/infrastructure/progress-projection.test.ts) : reconstruction et annulation sur erreur. |
 | E5 | API et bootstrap : session obligatoire, identité du joueur et validation des entrées. | [quests-api.test.ts](../../src/bootstrap/quests-api.test.ts) : authentification, isolation, entrées invalides et vue périmée. |
 | E6 | [Projection](../../src/modules/quests/infrastructure/progress-projection.ts), [service de réclamation](../../src/modules/quests/application/claim-service.ts), [confirmations](../../src/modules/quests/messages.ts) ; [ADR-0011](../adr/0011-daily-quests-communication.md). | Tests de projection, persistance et API : progression des participants, dépôts, confirmations et reprises. |
-| E7 | [personal-data.ts](../../src/modules/quests/personal-data.ts), [registre T8](../rgpd/registre-traitements.md), [revue de sécurité](../qualite/revue-securite-quests.md). | [quests-privacy.test.ts](../../src/bootstrap/quests-privacy.test.ts) : export isolé, suppression du compte et reconstruction. |
+| E7 | [personal-data.ts](../../src/modules/quests/personal-data.ts), [registre T8](../rgpd/registre-traitements.md), [revue de sécurité](../qualite/revue-securite-quests.md). | [quests-privacy.test.ts](../../src/bootstrap/quests-privacy.test.ts) : export isolé, suppression et reconstruction ; [régression](../../src/bootstrap/quests-privacy.test.ts#L608) : export incomplet refusé, puis réussi après rattrapage. Export, suppression et invalidation de session validés en production. |
 | E8 | Domaine et API ci-dessus ; correspondance BR-01–BR-12 en complément. | Validé : décisions métier BR-01–BR-12 couvertes par les tests du domaine ; GET `/api/quests` et POST `/api/quests/:id/claim` par les [tests API](../../src/bootstrap/quests-api.test.ts) ; SSE `/api/stream/quests` et son repli `/events` par les [tests temps réel](../../src/bootstrap/quests-realtime.test.ts). Les garanties de checkpoint, d'outbox et de concurrence sont testées en intégration. |
 | E9 | [.dependency-cruiser.cjs](../../.dependency-cruiser.cjs), règles existantes conservées. | `pnpm lint:archi` et [architecture.test.ts](../../src/bootstrap/architecture.test.ts) réussissent. |
-| E10 | [vercel.json](../../vercel.json), [migrate.ts](../../scripts/migrate.ts), [déploiement Vercel de `8268285`](https://vercel.com/tiffany-dbys-projects/royaumes/5CUBqCHFeCn5638XZEWMB7uFGfin). | Validé : contrôles, migrations, build et déploiement réussis ; Quests et les fonctionnalités existantes testés manuellement en production. |
+| E10 | [vercel.json](../../vercel.json), [migrate.ts](../../scripts/migrate.ts), [déploiement Vercel de `4da783c`](https://vercel.com/tiffany-dbys-projects/royaumes/4G9ChG8WNiGcNNHXyATB7jtQafRk). | Validé : version finale déployée et testée en production, correctif E7 inclus ; migrations appliquées. |
 
-E2 et E10 sont validés. J'ai vérifié les journaux Vercel de `8268285` : `pnpm verify`
-réussit avec 445 tests et aucune violation d'architecture, `pnpm db:migrate` indique
-« Migrations appliquées. », puis le build Next.js et le déploiement réussissent.
-Les tests fonctionnels ne couvrent pas les contrôles ciblés encore ouverts : isolation
-API/SSE entre deux comptes, export, suppression avec invalidation de session, reconnexions
-et cron.
+J'ai validé en production la version `4da783c` : Quêtes quotidiennes, progression,
+versement des récompenses, export, suppression du compte et invalidation de session.
+Les fonctionnalités existantes et les autres contrôles de production prévus sont également
+vérifiés avec succès.
+
+L'export JSON confirme le Bâtisseur à **2/2**, le Marchand à **1/1**, la récompense du
+Bâtisseur de **50 bois** acceptée et versée, ainsi que l'existence du Village et
+l'historique Quests.
+
+Le précédent déploiement `8268285`, le 31 octobre, avait validé 445 tests sans violation
+d'architecture, les migrations (« Migrations appliquées. ») et le build.
 
 ## Bonus revendiqués
 
@@ -69,35 +75,39 @@ qui reste distinct du Village intégré à l'application déployée.
 
 ## Indicateurs au rendu
 
-Résultats du 31 octobre, détaillés dans le [bilan technique](../bilan-technique.md).
-`pnpm verify` et `pnpm test:coverage` ont réussi sur `3efddd5`. La version `8268285` n'ajoute
-que le bilan : le code testé est identique. Pour `td11-fin` (`b681e18`), les tests avec
-couverture et le contrôle de dépendances ont été relancés dans un répertoire séparé,
-avec les mêmes dépendances et la même configuration Vitest.
+Résultats locaux du 1er novembre pour le code du commit `4da783c`, détaillés dans le
+[bilan technique](../bilan-technique.md). `pnpm verify` et `pnpm build` réussissent ;
+J'ai relancé `pnpm test:coverage`, dont le rapport HTML fournit la couverture.
+Les mesures initiales du 31 octobre portaient sur `3efddd5`, au code identique à `8268285`.
+Pour `td11-fin` (`b681e18`), les tests avec couverture et le contrôle de dépendances ont été
+relancés le 31 octobre dans un répertoire séparé, avec les mêmes dépendances et la même
+configuration Vitest.
 
 | Indicateur | À l'étiquette td11-fin | Au rendu |
 | --- | --- | --- |
-| Nombre de tests | 232 réussis | 445 réussis |
-| Couverture des lignes | 74,88 % | 76,86 % |
+| Nombre de tests | 232 réussis | 446 réussis |
+| Couverture des lignes | 74,88 % | 76,9 % |
 | Violations des règles d'architecture | 0 | 0 |
 
 Le projet passe de **33 à 43 fichiers de tests** et de **8 à 9 règles de dépendances** ;
 les deux tests structurels réussissent dans les deux versions. Les 33 fichiers historiques
-sont inchangés. Autres couvertures : instructions 73,28 → 75,37 %, branches 64,20 → 69,67 %,
-fonctions 69,78 → 71,09 %.
+sont inchangés ; **214 tests supplémentaires** ont été ajoutés. Autres couvertures :
+instructions 73,28 → 75,4 %, branches 64,20 → 69,73 %, fonctions 69,78 → 71,09 %.
 
 La [mesure V8](../../vitest.config.ts) couvre `src/**/*.ts` et `src/**/*.tsx`, hors tests ;
-elle n'inclut ni les pages `app/` ni les scripts. Avant la remise, il reste à relancer
-`pnpm verify` et `pnpm build`, confirmer la validation du cadrage, ajouter ce rendu au README
-et vérifier les liens et Mermaid sur GitHub. Les revues anciennes à actualiser sont signalées
-dans le bilan ; l'étiquette finale viendra après ces contrôles.
+elle n'inclut ni les pages `app/` ni les scripts.
+
+Le test de régression du correctif E7 vérifie qu'un rattrapage Quests incomplet provoque
+l'erreur standard `500 INTERNAL`, sans fichier joint, puis qu'un nouvel export réussit
+après rattrapage.
 
 ## Usage de l'IA générative
 
 J'ai utilisé ChatGPT pour discuter les choix d'architecture et Codex pour m'aider à
 implémenter le module, écrire les tests et préparer la documentation. J'ai relu les
 propositions et les modifications avant mes commits, en avançant par périmètres validés.
-Les résultats présentés viennent des contrôles automatisés exécutés, détaillés dans le bilan.
+Les résultats présentés viennent des contrôles automatisés et de mes vérifications manuelles
+en production, détaillés dans le bilan.
 Les ADR historiques précisent les autres contributions, notamment celles de GitHub Copilot.
 
 ## Compléments

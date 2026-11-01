@@ -170,7 +170,9 @@ page « Mes données » :
   `platform.erasures`.
 
 L'export inclut la progression, les participations, l'existence du Village et les récompenses
-du joueur dans les Quêtes. Après suppression du compte, ces données sans noms sont conservées
+du joueur dans les Quêtes. Si leur projection n'est pas encore rattrapée, l'export est refusé
+plutôt que renvoyé incomplet ; il peut être redemandé après rattrapage.
+Après suppression du compte, ces données sans noms sont conservées
 sous forme pseudonyme pour le rejeu et le règlement des récompenses
 ([ADR 0010](docs/adr/0010-daily-quests-persistence.md)).
 
