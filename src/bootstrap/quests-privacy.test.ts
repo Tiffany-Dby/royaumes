@@ -1,5 +1,5 @@
 import { asc, eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { gameChannel } from '@/modules/dungeon/contracts'
 import { offerStream } from '@/modules/market/contracts'
 import { createQuestsModule } from '@/modules/quests'
@@ -604,4 +604,37 @@ describe('Quests personal data integration', () => {
       expect(await runner.catchUp(progressProjection)).toBe(0)
     },
   )
+
+  it('refuses an incomplete Quests export at a journal gap and succeeds after catch-up', async () => {
+    const api = await createTestApi()
+    const now = Date.now()
+    const wallClock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const store = createEventStore(api.db)
+      await store.append('export-gap', 0, [{ type: 'UnrelatedEvent', data: {} }])
+      await expect(
+        store.append('export-gap', 0, [{ type: 'UnrelatedEvent', data: {} }]),
+      ).rejects.toMatchObject({ name: 'ConcurrencyError' })
+      await foundAndUpgrade(api, 'alice')
+
+      const response = await api.get('/api/account/export')
+      expect(response.status).toBe(500)
+      expect(response.headers.get('Content-Disposition')).toBeNull()
+      expect(await response.json()).toEqual({
+        error: { code: 'INTERNAL', message: 'Erreur interne' },
+      })
+
+      wallClock.mockReturnValue(now + 10_000)
+      expect((await exportSections(api)).quests).toEqual({
+        villageExists: true,
+        claims: [],
+        progress: [{ day: '2026-01-01', questId: 'builder', count: 1 }],
+        dungeonParticipations: [],
+        marketParticipations: [],
+      })
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
 })

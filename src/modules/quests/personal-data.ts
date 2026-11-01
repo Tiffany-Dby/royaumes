@@ -24,7 +24,12 @@ export function createQuestsPersonalData(
   return {
     name: 'quests',
     async export(playerId) {
+      const target = await store.lastPosition()
       await projections.catchUp(progressProjection)
+      // Catch-up may stop at a journal gap; exporting partial facts would hide existing data.
+      if ((await projections.positionOf(progressProjection.name)) < target) {
+        throw new Error('Quests personal data requires projection catch-up')
+      }
       const progress = await db
         .select({
           day: dailyProgress.day,
